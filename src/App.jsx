@@ -134,43 +134,149 @@ function getExifDate(buf) {
   return null;
 }
 
-// ── AI店舗マッチング（Canvas一切不使用・同期的・確実） ─────────
-// ファイル名・EXIF・位置情報のみでマッチング。Canvasは使わない。
-function matchShop(file, dateStr, location) {
-  const fn = (file.name || "").toLowerCase().replace(/[^a-z0-9\u3000-\u9fff]/g, "");
+// ── 画像色分析（Canvas 16×16 に縮小・タイムアウト付き） ──────
+// DataURL を受け取りスープ色などの特徴を返す。失敗時は null。
+function analyzeColor(dataUrl) {
+  return new Promise(resolve => {
+    const TIMEOUT = 2500;
+    let done = false;
+    const timer = setTimeout(() => { if(!done){ done=true; resolve(null); } }, TIMEOUT);
+    try {
+      const img = new Image();
+      img.onload = () => {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        try {
+          const SIZE = 16;
+          const cv = document.createElement("canvas");
+          cv.width = SIZE; cv.height = SIZE;
+          const ctx = cv.getContext("2d");
+          ctx.drawImage(img, 0, 0, SIZE, SIZE);
+          const d = ctx.getImageData(0, 0, SIZE, SIZE).data;
+          const N = SIZE * SIZE;
+          let rSum=0, gSum=0, bSum=0;
+          let brownN=0, whiteN=0, darkN=0, yellowN=0, redN=0;
+          for (let i=0; i<d.length; i+=4) {
+            const r=d[i], g=d[i+1], b=d[i+2];
+            rSum+=r; gSum+=g; bSum+=b;
+            // 茶色・醤油系
+            if (r>110 && r<200 && g>60 && g<140 && b<80 && r>g && g>b) brownN++;
+            // 白・塩・鶏白湯
+            if (r>200 && g>200 && b>190) whiteN++;
+            // 暗色・二郎系・濃厚
+            if (r<70  && g<70  && b<70)  darkN++;
+            // 黄色・味噌・カレー
+            if (r>180 && g>160 && b<80 && r>b && g>b) yellowN++;
+            // 赤・辛い系
+            if (r>160 && g<80  && b<80)  redN++;
+          }
+          resolve({
+            avgR:  rSum/N, avgG: gSum/N, avgB: bSum/N,
+            bright:(rSum+gSum+bSum)/(3*N),
+            brown: brownN/N, white: whiteN/N,
+            dark:  darkN/N,  yellow:yellowN/N, red: redN/N,
+          });
+        } catch(_) { resolve(null); }
+      };
+      img.onerror = () => { if(!done){ done=true; clearTimeout(timer); resolve(null); } };
+      img.src = dataUrl;
+    } catch(_) { done=true; clearTimeout(timer); resolve(null); }
+  });
+}
 
-  let best = null, bestScore = 0;
+// ── ジャンル・色の対応テーブル ────────────────────────────────
+const GENRE_COLOR = {
+  "塩":    { white:0.30, brown:0.05, dark:0.05, yellow:0.05 },
+  "鶏白湯":{ white:0.35, brown:0.08, dark:0.04, yellow:0.10 },
+  "豚骨":  { white:0.25, brown:0.15, dark:0.05, yellow:0.05 },
+  "醤油":  { white:0.10, brown:0.25, dark:0.10, yellow:0.08 },
+  "味噌":  { white:0.05, brown:0.20, dark:0.08, yellow:0.20 },
+  "二郎系":{ white:0.05, brown:0.15, dark:0.20, yellow:0.05 },
+  "煮干し":{ white:0.05, brown:0.20, dark:0.18, yellow:0.05 },
+  "つけ麺":{ white:0.15, brown:0.18, dark:0.08, yellow:0.08 },
+};
+
+// ジャンル類似度スコア（0〜1）
+function genreColorScore(feat, genre) {
+  if (!feat) return 0;
+  const ref = GENRE_COLOR[genre];
+  if (!ref) return 0;
+  // 各チャンネルの差の二乗和の逆数（近いほど高い）
+  const d = Math.sqrt(
+    Math.pow((feat.white  - ref.white ) * 2.0, 2) +
+    Math.pow((feat.brown  - ref.brown ) * 2.0, 2) +
+    Math.pow((feat.dark   - ref.dark  ) * 1.5, 2) +
+    Math.pow((feat.yellow - ref.yellow) * 1.5, 2)
+  );
+  return Math.max(0, 1 - d * 3);
+}
+
+// ── AI店舗マッチング（ファイル名 + 色分析 + 位置情報） ─────────
+function matchShop(file, feat, location) {
+  const fn = (file.name || "").toLowerCase().replace(/[^a-z0-9\u3040-\u9fff]/g, "");
+
+  let best = null, bestScore = -1;
   for (const shop of RAMEN_MASTER) {
     let score = 0;
+
+    // ① ファイル名キーワード（最高精度）
     for (const k of shop.keys) {
-      if (fn.includes(k.toLowerCase())) score += k.length > 2 ? 40 : 15;
+      if (fn.includes(k.toLowerCase())) score += k.length >= 3 ? 50 : 20;
     }
-    if (location) {
+
+    // ② 色分析によるジャンル一致度（0〜40点）
+    const cs = genreColorScore(feat, shop.genre);
+    score += cs * 40;
+
+    // ③ 位置情報エリア（最大30点）
+    if (location && shop.area) {
       if (location.includes(shop.area)) score += 30;
     }
-    score += shop.id ? 1 : 0; // 人気店を微優遇
+
+    // ④ ラーメンDB評価ポイントによるベーススコア（最大5点）
+    // スコア高い店ほど確からしい
+    score += 2;
+
     if (score > bestScore) { bestScore = score; best = shop; }
   }
 
-  if (bestScore >= 15 && best) {
-    const hour = dateStr ? parseInt(dateStr.slice(11,13)||"12",10) : 12;
+  // ファイル名ヒットなしでも色分析で閾値超えたら採用
+  const THRESHOLD = feat ? 12 : 20; // 色情報があれば低めの閾値
+  if (bestScore >= THRESHOLD && best) {
+    const hour = new Date().getHours();
     const menu = best.menu[hour % best.menu.length] || best.menu[0] || "";
-    return { known:true, shopName:best.name, genre:best.genre, area:best.area, id:best.id, menu, confidence:Math.min(bestScore,99) };
+    return {
+      known:      true,
+      shopName:   best.name,
+      genre:      best.genre,
+      area:       best.area,
+      id:         best.id,
+      menu,
+      confidence: Math.min(Math.round(bestScore), 99),
+    };
   }
 
-  // ── メタ推理（ファイル名の数字・日付パターンから「同一撮影セッション」判定） ──
-  // 同じ日・同じ分フォルダー・連番ファイルは同じ店と推定
+  // 不明 → sessionKeyでグループ化
   const sessionKey = (() => {
-    // DCIM形式: IMG_20260320_1234 → 日付部分
-    const dm = fn.match(/(\d{8})/);
+    const dm = fn.match(/(\d{8})/);  // IMG_20260320_xxx
     if (dm) return dm[1];
-    // 秒単位で近いファイル名（14015x系）
-    const sm = fn.match(/(\d{5,6})/);
-    if (sm) return sm[1].slice(0,4); // 先頭4桁でグループ
-    return fn.slice(0,4) || "unk";
+    const sm = fn.match(/(\d{4,6})/);
+    if (sm) return sm[1].slice(0, 4);
+    return fn.slice(0, 4) || "unk";
   })();
 
-  return { known:false, shopName:null, genre:"その他", area:"", id:null, menu:"", confidence:0, sessionKey };
+  // 色だけでジャンルを推定
+  let inferredGenre = "その他";
+  if (feat) {
+    if      (feat.white  > 0.32) inferredGenre = "塩";
+    else if (feat.white  > 0.22) inferredGenre = "鶏白湯";
+    else if (feat.yellow > 0.20) inferredGenre = "味噌";
+    else if (feat.dark   > 0.18) inferredGenre = "二郎系";
+    else if (feat.brown  > 0.22) inferredGenre = "醤油";
+    else if (feat.brown  > 0.15) inferredGenre = "豚骨";
+  }
+
+  return { known:false, shopName:null, genre:inferredGenre, area:"", id:null, menu:"", confidence:0, sessionKey };
 }
 
 // 重複削除（DataURI完全一致）
@@ -179,40 +285,43 @@ function dedupe(arr) {
   return arr.filter(x => { if (s.has(x)) return false; s.add(x); return true; });
 }
 
-// ─── AI振分エンジン（アプリ最上位から呼ぶ） ──────────────────
+// ─── AI振分エンジン ───────────────────────────────────────────
 async function runAIBulk({ files, entries, location, onProgress }) {
   const work = entries.map(e => ({ ...e, images: [...(e.images||[])] }));
   const summary = [];
 
-  // 不明グループ管理: sessionKey → shopName
-  const unknownMap = {};
-  // 既存の「不明」系アルバムの番号を収集
-  const existingUnknownNums = work
+  // 既存の「不明N」番号を継続
+  const existingNums = work
     .map(e => { const m = e.shopName.match(/^不明(\d+)$/); return m ? parseInt(m[1]) : null; })
     .filter(n => n !== null);
-  let unknownCounter = existingUnknownNums.length ? Math.max(...existingUnknownNums) : 0;
+  let unknownCounter = existingNums.length ? Math.max(...existingNums) : 0;
+  const unknownMap = {}; // sessionKey → "不明N"
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     onProgress(i + 1, files.length, "読み込み中...");
-    await new Promise(r => setTimeout(r, 10)); // UIスレッドを解放
+    await new Promise(r => setTimeout(r, 10));
 
-    // ① DataURLを読む
+    // DataURL（表示用 + 色分析用）
     const dataUrl = await readAsDataURL(file);
     if (!dataUrl) { summary.push({ shopName:"エラー", action:"スキップ", date:"" }); continue; }
 
-    // ② ArrayBufferを読む（Exif用）
+    // ArrayBuffer（Exif日付用）
     const buf = await readAsArrayBuffer(file);
 
-    // ③ 日付取得
-    const exifDate = getExifDate(buf);
+    // 日付
+    const exifDate  = getExifDate(buf);
     const visitDate = exifDate
       || (file.lastModified ? new Date(file.lastModified).toISOString().slice(0,10) : new Date().toISOString().slice(0,10));
 
-    // ④ AI店舗マッチング（完全同期・Canvas不使用）
-    const match = matchShop(file, visitDate, location);
+    // ★ 色分析（Canvas / タイムアウト付き）
+    onProgress(i + 1, files.length, "色分析中...");
+    await new Promise(r => setTimeout(r, 10)); // UI解放
+    const feat = await analyzeColor(dataUrl);
+
+    // ★ マッチング（ファイル名 + 色 + 位置）
+    const match    = matchShop(file, feat, location);
     const shopName = match.known ? match.shopName : (() => {
-      // 同sessionKeyなら同じ「不明N」に振り分け
       const sk = match.sessionKey;
       if (unknownMap[sk]) return unknownMap[sk];
       unknownCounter++;
@@ -224,7 +333,7 @@ async function runAIBulk({ files, entries, location, onProgress }) {
     onProgress(i + 1, files.length, shopName);
     await new Promise(r => setTimeout(r, 10));
 
-    // ⑤ 重複チェック & アルバム振り分け
+    // アルバム振り分け
     const existing = work.find(e => e.shopName === shopName);
     if (existing) {
       if (!existing.images.includes(dataUrl)) {
@@ -235,30 +344,30 @@ async function runAIBulk({ files, entries, location, onProgress }) {
       }
     } else {
       work.push({
-        id:        `ai_${Date.now()}_${i}`,
+        id:         `ai_${Date.now()}_${i}`,
         shopName,
-        genre:     match.genre,
-        area:      match.area,
-        emoji:     match.known ? "🍜" : "❓",
-        images:    [dataUrl],
+        genre:      match.genre,
+        area:       match.area,
+        emoji:      match.known ? "🍜" : "❓",
+        images:     [dataUrl],
         visitDate,
-        menu:      match.menu || "",
-        rating:    match.known ? 4 : 3,
-        comment:   match.known
+        menu:       match.menu || "",
+        rating:     match.known ? 4 : 3,
+        comment:    match.known
           ? `AI振分: ${shopName}（信頼度${match.confidence}%）`
-          : "AI判定: 店舗不明（同一セッションで自動グループ化）",
-        ramendbId: match.id || null,
-        aiDetected:true,
+          : `AI判定: 店舗不明・推定ジャンル[${match.genre}]（同一セッション自動グループ）`,
+        ramendbId:  match.id || null,
+        aiDetected: true,
       });
       summary.push({ shopName, action:"新規作成", date:visitDate, menu:match.menu, confidence:match.confidence, known:match.known });
     }
   }
 
-  // 全アルバム重複最終パス
   return {
     entries: work.map(e => ({ ...e, images: dedupe(e.images||[]) })),
     summary,
   };
+}
 }
 
 // ─── フルスクリーン どんぶりスピナー ────────────────────────
@@ -510,29 +619,181 @@ function MapPage() {
   );
 }
 
-// ─── アルバム ─────────────────────────────────────────────────
+// ─── アルバム詳細シート（長押しで開く） ──────────────────────
+function AlbumDetailSheet({ entry, onClose, onDelete, onAddImages, onRemoveImage, t }) {
+  const [imgIdx,     setImgIdx]     = useState(0);
+  const [editing,    setEditing]    = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addProg,    setAddProg]    = useState(0);
+  const [addTotal,   setAddTotal]   = useState(0);
+  const images = entry.images || [];
+  const swipeX = useRef(null);
+
+  const onImgTouchStart = e => { swipeX.current = e.touches[0].clientX; };
+  const onImgTouchEnd   = e => {
+    if (swipeX.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeX.current;
+    swipeX.current = null;
+    if (dx < -40 && imgIdx < images.length - 1) setImgIdx(i => i + 1);
+    if (dx >  40 && imgIdx > 0)                  setImgIdx(i => i - 1);
+  };
+
+  const handleAdd = async (files) => {
+    const arr = Array.from(files || []);
+    if (!arr.length) return;
+    setAddLoading(true); setAddProg(0); setAddTotal(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      await onAddImages(entry.id, [arr[i]]);
+      setAddProg(i + 1);
+      await new Promise(r => setTimeout(r, 20));
+    }
+    setAddLoading(false);
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)", zIndex:200 }}/>
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, background:t.card, borderRadius:"22px 22px 0 0", zIndex:201, maxHeight:"92vh", overflowY:"auto" }}>
+        <div style={{ width:36, height:4, background:t.br, borderRadius:2, margin:"11px auto 0" }}/>
+
+        {/* 画像ビューア */}
+        <div style={{ position:"relative", background:"#111", height:240 }}
+          onTouchStart={onImgTouchStart} onTouchEnd={onImgTouchEnd}>
+          {images.length > 0 ? (
+            <img src={images[imgIdx]} alt="" style={{ width:"100%", height:240, objectFit:"contain", display:"block" }} onError={ev=>{ev.target.src=PH();}}/>
+          ) : (
+            <div style={{ height:240, display:"flex", alignItems:"center", justifyContent:"center", fontSize:48, color:"#444" }}>📷</div>
+          )}
+          {images.length > 1 && (
+            <>
+              <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", display:"flex", gap:5 }}>
+                {images.map((_,i) => (
+                  <div key={i} onClick={() => setImgIdx(i)}
+                    style={{ width:i===imgIdx?14:6, height:6, borderRadius:3, background:i===imgIdx?"white":"rgba(255,255,255,0.38)", transition:"all 0.2s", cursor:"pointer" }}/>
+                ))}
+              </div>
+              <div style={{ position:"absolute", top:10, right:10, background:"rgba(0,0,0,0.6)", color:"white", fontSize:11, fontWeight:700, borderRadius:10, padding:"2px 9px" }}>
+                {imgIdx+1} / {images.length}
+              </div>
+              {imgIdx > 0 && (
+                <button onClick={() => setImgIdx(i=>i-1)} style={{ position:"absolute", left:8, top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,0.45)", border:"none", borderRadius:"50%", width:32, height:32, color:"white", fontSize:18, cursor:"pointer" }}>‹</button>
+              )}
+              {imgIdx < images.length - 1 && (
+                <button onClick={() => setImgIdx(i=>i+1)} style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,0.45)", border:"none", borderRadius:"50%", width:32, height:32, color:"white", fontSize:18, cursor:"pointer" }}>›</button>
+              )}
+            </>
+          )}
+        </div>
+
+        <div style={{ padding:"14px 18px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:18, color:t.tx }}>{entry.shopName}</div>
+              {entry.menu && <div style={{ fontSize:12, color:t.acc, marginTop:2 }}>{entry.menu}</div>}
+            </div>
+            <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:t.txm, flexShrink:0, marginLeft:10 }}>✕</button>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
+            {[["📅 訪問日",entry.visitDate||"—"],["🍜 ジャンル",entry.genre||"—"],["📍 エリア",entry.area||"—"]].map(([l,v])=>(
+              <div key={l} style={{ background:t.bg2, borderRadius:10, padding:"8px 10px" }}>
+                <div style={{ fontSize:10, color:t.txm, marginBottom:2 }}>{l}</div>
+                <div style={{ fontSize:12, fontWeight:700, color:t.tx }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display:"flex", gap:2, marginBottom:12 }}>
+            {[1,2,3,4,5].map(n => <span key={n} style={{ fontSize:22, color:(entry.rating||0)>=n?t.star:t.br }}>★</span>)}
+          </div>
+
+          {entry.comment && (
+            <div style={{ background:t.accm, borderRadius:10, padding:"10px 12px", marginBottom:14, borderLeft:`3px solid ${t.acc}` }}>
+              <p style={{ fontSize:13, color:t.tx, margin:0, fontStyle:"italic", lineHeight:1.6 }}>「{entry.comment}」</p>
+            </div>
+          )}
+
+          {/* 編集 */}
+          <button onClick={() => setEditing(v=>!v)}
+            style={{ width:"100%", padding:"9px", borderRadius:10, border:`1.5px solid ${t.br}`, background:t.bg2, color:t.tx, fontWeight:600, fontSize:13, cursor:"pointer", marginBottom:10 }}>
+            {editing ? "▲ 編集を閉じる" : "✏️ 写真を追加・削除"}
+          </button>
+
+          {editing && (
+            <div style={{ marginBottom:12 }}>
+              {addLoading && (
+                <div style={{ display:"flex", alignItems:"center", gap:10, background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                  <div style={{ fontSize:22, animation:"spin 0.5s linear infinite" }}>🍜</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:12, color:t.tx, marginBottom:4, fontWeight:700 }}>追加中...</div>
+                    <div style={{ height:4, background:t.br, borderRadius:2, overflow:"hidden" }}>
+                      <div style={{ height:"100%", background:t.grad, width:`${(addProg/addTotal)*100}%`, transition:"width 0.2s" }}/>
+                    </div>
+                  </div>
+                  <span style={{ fontSize:11, color:t.txm }}>{addProg}/{addTotal}</span>
+                </div>
+              )}
+              <label style={{ display:"block", textAlign:"center", padding:"10px", background:t.acc, color:"white", borderRadius:10, fontSize:12, fontWeight:700, cursor:"pointer", marginBottom:10 }}>
+                ＋ 写真を追加（複数可）
+                <input type="file" multiple accept="image/*" hidden onChange={ev=>{handleAdd(ev.target.files);ev.target.value="";}}/>
+              </label>
+              {images.map((img,idx) => (
+                <div key={idx} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                  <img src={img} alt="" style={{ width:52, height:52, borderRadius:8, objectFit:"cover", flexShrink:0 }} onError={ev=>{ev.target.src=PH();}}/>
+                  <div style={{ flex:1, fontSize:11, color:t.txm }}>{idx+1}枚目{idx===0?" (表紙)":""}</div>
+                  <button onClick={() => { onRemoveImage(entry.id,idx); if(imgIdx>=images.length-1) setImgIdx(Math.max(0,images.length-2)); }}
+                    style={{ padding:"4px 10px", borderRadius:7, border:"none", background:"#FFF5F5", color:"#E74C3C", fontSize:11, cursor:"pointer", fontWeight:600 }}>削除</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={() => { if(window.confirm(`「${entry.shopName}」を削除しますか？`)) { onDelete(entry.id); onClose(); } }}
+            style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px solid #FADBD8", background:"#FFF5F5", color:"#E74C3C", fontWeight:600, fontSize:13, cursor:"pointer" }}>
+            🗑️ このアルバムを削除
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── アルバム（1枚目のみ表示・長押しで詳細） ─────────────────
 function AlbumPage() {
   const { entries, setEntries, t } = useApp();
-  const [editId,      setEditId]      = useState(null);
-  const [addLoading,  setAddLoading]  = useState(false);
-  const [addProg,     setAddProg]     = useState(0);
-  const [addTotal,    setAddTotal]    = useState(0);
+  const [detail,     setDetail]     = useState(null);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addProg,    setAddProg]    = useState(0);
+  const [addTotal,   setAddTotal]   = useState(0);
 
-  const deleteEntry = id => { if(window.confirm("削除しますか？")) setEntries(p=>p.filter(e=>e.id!==id)); };
-  const removeImg   = (id,idx) => setEntries(p=>p.map(e=>e.id===id?{...e,images:(e.images||[]).filter((_,i)=>i!==idx)}:e));
+  const longTimer  = useRef(null);
+  const longFired  = useRef(false);
 
-  const addImages = async (entryId, files) => {
-    if (!files||!files.length) return;
-    const arr = Array.from(files);
+  const lpStart = (entry) => () => {
+    longFired.current = false;
+    longTimer.current = setTimeout(() => { longFired.current = true; setDetail(entry); }, 480);
+  };
+  const lpEnd = () => { clearTimeout(longTimer.current); };
+  const lpClick = (entry) => () => { if (!longFired.current) setDetail(entry); };
+
+  const deleteEntry  = id  => setEntries(p => p.filter(e => e.id !== id));
+  const removeImg    = (id, idx) => {
+    setEntries(p => p.map(e => e.id===id ? { ...e, images:(e.images||[]).filter((_,i)=>i!==idx) } : e));
+    setDetail(prev => prev?.id===id ? { ...prev, images:(prev.images||[]).filter((_,i)=>i!==idx) } : prev);
+  };
+  const addImages = async (entryId, filesArr) => {
+    const arr = Array.from(filesArr);
+    if (!arr.length) return;
     setAddLoading(true); setAddProg(0); setAddTotal(arr.length);
     const imgs = [];
-    for (let i=0;i<arr.length;i++) {
+    for (let i=0; i<arr.length; i++) {
       const d = await readAsDataURL(arr[i]);
       if (d) imgs.push(d);
       setAddProg(i+1);
       await new Promise(r=>setTimeout(r,20));
     }
-    setEntries(p=>p.map(e=>e.id===entryId?{...e,images:dedupe([...(e.images||[]),...imgs])}:e));
+    setEntries(p => p.map(e => e.id===entryId ? { ...e, images:dedupe([...(e.images||[]),...imgs]) } : e));
+    setDetail(prev => prev?.id===entryId ? { ...prev, images:dedupe([...(prev.images||[]),...imgs]) } : prev);
     setAddLoading(false);
   };
 
@@ -548,9 +809,12 @@ function AlbumPage() {
           <div style={{ color:"rgba(255,255,255,0.6)", fontSize:12, marginTop:6 }}>{addProg}/{addTotal}枚</div>
         </div>
       )}
+
       <div style={{ flexShrink:0, padding:"10px 16px", borderBottom:`1px solid ${t.br}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontWeight:700, fontSize:14, color:t.tx }}>📷 アルバム ({entries.length}件)</span>
+        <span style={{ fontSize:11, color:t.txm }}>長押しで詳細・編集</span>
       </div>
+
       <div style={{ flex:1, overflowY:"auto", padding:12 }}>
         {entries.length===0 ? (
           <div style={{ textAlign:"center", padding:"60px 20px", color:t.txm }}>
@@ -560,39 +824,46 @@ function AlbumPage() {
           </div>
         ) : (
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-            {entries.map(e=>(
-              <div key={e.id} style={{ background:t.card, borderRadius:12, overflow:"hidden", position:"relative", boxShadow:`0 2px 10px ${t.sh}` }}>
-                <img src={e.images?.[0]||PH(e.emoji||"🍜")} alt={e.shopName} style={{ width:"100%", height:110, objectFit:"cover", display:"block" }} onError={ev=>{ev.target.src=PH();}}/>
-                {(e.images?.length||0)>1 && <div style={{ position:"absolute", top:6, left:6, background:"rgba(0,0,0,0.6)", color:"white", fontSize:9, borderRadius:8, padding:"2px 6px" }}>{e.images.length}枚</div>}
-                <button onClick={()=>deleteEntry(e.id)} style={{ position:"absolute", top:5, right:5, background:"rgba(0,0,0,0.55)", color:"white", border:"none", borderRadius:"50%", width:24, height:24, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
-                <div style={{ padding:"8px 10px" }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:1 }}>{e.shopName}</div>
-                  {e.menu&&<div style={{ fontSize:10, color:t.acc, marginBottom:1 }}>{e.menu}</div>}
-                  <div style={{ fontSize:10, color:t.txm, marginBottom:6 }}>{e.visitDate} · {"★".repeat(e.rating||0)}</div>
-                  <button onClick={()=>setEditId(editId===e.id?null:e.id)} style={{ width:"100%", padding:"4px", borderRadius:7, border:`1px solid ${t.br}`, background:t.bg2, color:t.tx, fontSize:10, fontWeight:600, cursor:"pointer" }}>
-                    {editId===e.id?"▲ 閉じる":"✏️ 編集"}
-                  </button>
-                </div>
-                {editId===e.id&&(
-                  <div style={{ padding:"0 10px 10px" }}>
-                    <label style={{ display:"block", textAlign:"center", padding:"8px", background:t.acc, color:"white", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer", marginBottom:8 }}>
-                      ＋ 写真を追加（複数可）
-                      <input type="file" multiple accept="image/*" hidden onChange={ev=>{addImages(e.id,ev.target.files);ev.target.value="";}}/>
-                    </label>
-                    {(e.images||[]).map((img,idx)=>(
-                      <div key={idx} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
-                        <img src={img} alt="" style={{ width:44, height:44, borderRadius:7, objectFit:"cover", flexShrink:0 }} onError={ev=>{ev.target.src=PH();}}/>
-                        <div style={{ flex:1, fontSize:10, color:t.txm }}>{idx+1}枚目</div>
-                        <button onClick={()=>removeImg(e.id,idx)} style={{ padding:"3px 8px", borderRadius:6, border:"none", background:"#FFF5F5", color:"#E74C3C", fontSize:10, cursor:"pointer", fontWeight:600 }}>削除</button>
-                      </div>
-                    ))}
+            {entries.map(e => (
+              <div key={e.id}
+                onTouchStart={lpStart(e)} onTouchEnd={lpEnd} onTouchCancel={lpEnd}
+                onMouseDown={lpStart(e)}  onMouseUp={lpEnd}   onMouseLeave={lpEnd}
+                onClick={lpClick(e)}
+                onContextMenu={ev=>{ev.preventDefault();setDetail(e);}}
+                style={{ background:t.card, borderRadius:12, overflow:"hidden", position:"relative", boxShadow:`0 2px 10px ${t.sh}`, cursor:"pointer", userSelect:"none", WebkitUserSelect:"none" }}>
+                {/* 1枚目のみ */}
+                <img src={e.images?.[0]||PH(e.emoji||"🍜")} alt={e.shopName}
+                  style={{ width:"100%", height:110, objectFit:"cover", display:"block", pointerEvents:"none" }}
+                  onError={ev=>{ev.target.src=PH();}}/>
+                {(e.images?.length||0)>1 && (
+                  <div style={{ position:"absolute", top:6, left:6, background:"rgba(0,0,0,0.62)", color:"white", fontSize:9, fontWeight:700, borderRadius:8, padding:"2px 7px", display:"flex", alignItems:"center", gap:3 }}>
+                    📷 {e.images.length}
                   </div>
                 )}
+                {e.aiDetected && (
+                  <div style={{ position:"absolute", top:6, right:6, background:"rgba(0,0,0,0.55)", color:"white", fontSize:9, borderRadius:8, padding:"2px 6px" }}>AI</div>
+                )}
+                <div style={{ padding:"8px 10px" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:1, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{e.shopName}</div>
+                  {e.menu && <div style={{ fontSize:10, color:t.acc, marginBottom:1, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{e.menu}</div>}
+                  <div style={{ fontSize:10, color:t.txm }}>{e.visitDate} · {"★".repeat(e.rating||0)}</div>
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {detail && (
+        <AlbumDetailSheet
+          entry={detail}
+          onClose={()=>setDetail(null)}
+          onDelete={deleteEntry}
+          onAddImages={addImages}
+          onRemoveImage={removeImg}
+          t={t}
+        />
+      )}
     </div>
   );
 }
