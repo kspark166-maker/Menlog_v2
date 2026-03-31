@@ -259,8 +259,10 @@ function RecommendPage() {
 // ─── アルバム ─────────────────────────────────────────────────
 function AlbumPage() {
   const { entries, setEntries, t } = useApp();
-  const fileRef = useRef(null);
-  const [editId, setEditId] = useState(null);
+  const [editId,      setEditId]      = useState(null);
+  const [addingImgs,  setAddingImgs]  = useState(false); // 画像追加中フラグ
+  const [addProgress, setAddProgress] = useState(0);
+  const [addTotal,    setAddTotal]    = useState(0);
 
   const deleteEntry = (id) => {
     if (window.confirm("この記録を削除しますか？")) {
@@ -268,77 +270,110 @@ function AlbumPage() {
     }
   };
 
-  // 複数画像追加
-  const addImages = (id, files) => {
-    const readers = Array.from(files).map(file =>
-      new Promise(res => { const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(file); })
-    );
-    Promise.all(readers).then(imgs => {
-      setEntries(prev => prev.map(e => e.id === id ? { ...e, images: [...(e.images||[]), ...imgs] } : e));
-    });
+  // ── 複数画像追加（1枚ずつ順番に読み込み・白画面防止） ──────
+  const addImages = async (entryId, files) => {
+    if (!files || files.length === 0) return;
+    const fileArr = Array.from(files);
+    setAddingImgs(true);
+    setAddProgress(0);
+    setAddTotal(fileArr.length);
+
+    const newImgs = [];
+    for (let i = 0; i < fileArr.length; i++) {
+      const dataUrl = await readFileAsDataURL(fileArr[i]);
+      newImgs.push(dataUrl);
+      setAddProgress(i + 1);
+      // UIを更新させるため1フレーム待つ
+      await new Promise(r => setTimeout(r, 30));
+    }
+
+    setEntries(prev => prev.map(e =>
+      e.id === entryId
+        ? { ...e, images: deduplicateImages([...(e.images||[]), ...newImgs]) }
+        : e
+    ));
+    setAddingImgs(false);
+    setAddProgress(0);
   };
 
   const removeImage = (entryId, imgIdx) => {
-    setEntries(prev => prev.map(e => e.id === entryId
-      ? { ...e, images: e.images.filter((_,i) => i !== imgIdx) }
-      : e
+    setEntries(prev => prev.map(e =>
+      e.id === entryId
+        ? { ...e, images: (e.images||[]).filter((_,i) => i !== imgIdx) }
+        : e
     ));
   };
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:t.bg }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:t.bg, position:"relative" }}>
+
+      {/* 画像追加中オーバーレイ（白画面の代わり） */}
+      {addingImgs && (
+        <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.72)", zIndex:50, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", borderRadius:0 }}>
+          <div style={{ fontSize:52, animation:"spin 0.5s linear infinite", marginBottom:14 }}>🍜</div>
+          <div style={{ color:"white", fontWeight:700, fontSize:16, marginBottom:8 }}>画像を追加中...</div>
+          <div style={{ width:180, height:5, background:"rgba(255,255,255,0.2)", borderRadius:3, overflow:"hidden" }}>
+            <div style={{ height:"100%", background:"linear-gradient(90deg,#E74C3C,#FF6B6B)", width:`${(addProgress/addTotal)*100}%`, borderRadius:3, transition:"width 0.2s" }}/>
+          </div>
+          <div style={{ color:"rgba(255,255,255,0.65)", fontSize:12, marginTop:6 }}>{addProgress} / {addTotal} 枚</div>
+        </div>
+      )}
+
       <div style={{ flexShrink:0, padding:"10px 16px", borderBottom:`1px solid ${t.br}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontWeight:700, fontSize:14, color:t.tx }}>📷 アルバム ({entries.length}件)</span>
       </div>
+
       <div style={{ flex:1, overflowY:"auto", padding:12 }}>
         {entries.length === 0 ? (
           <div style={{ textAlign:"center", padding:"60px 20px", color:t.txm }}>
             <div style={{ fontSize:48 }}>📷</div>
             <div style={{ marginTop:12, fontWeight:700, color:t.tx }}>記録がありません</div>
+            <div style={{ fontSize:12, marginTop:6 }}>ホームの「＋ 記録」から追加できます</div>
           </div>
         ) : (
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
             {entries.map(e => (
               <div key={e.id} style={{ background:t.card, borderRadius:12, overflow:"hidden", position:"relative", boxShadow:`0 2px 10px ${t.sh}` }}>
-                {/* [FIX-3] placeholder.com廃止 → PLACEHOLDER() SVG */}
                 <img
                   src={e.images?.[0] || PLACEHOLDER()}
                   alt={e.shopName}
                   style={{ width:"100%", height:110, objectFit:"cover", display:"block" }}
                   onError={ev => { ev.target.src = PLACEHOLDER(); }}
                 />
-                {/* 複数枚バッジ */}
                 {(e.images?.length||0) > 1 && (
                   <div style={{ position:"absolute", top:6, left:6, background:"rgba(0,0,0,0.6)", color:"white", fontSize:9, borderRadius:8, padding:"2px 6px" }}>
                     {e.images.length}枚
                   </div>
                 )}
-                {/* 削除ボタン */}
                 <button onClick={() => deleteEntry(e.id)}
-                  style={{ position:"absolute", top:5, right:5, background:"rgba(0,0,0,0.55)", color:"white", border:"none", borderRadius:"50%", width:24, height:24, fontSize:12, cursor:"pointer", lineHeight:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  style={{ position:"absolute", top:5, right:5, background:"rgba(0,0,0,0.55)", color:"white", border:"none", borderRadius:"50%", width:24, height:24, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
                   ×
                 </button>
                 <div style={{ padding:"8px 10px" }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:2 }}>{e.shopName}</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:1 }}>{e.shopName}</div>
+                  {e.menu && <div style={{ fontSize:10, color:t.acc, marginBottom:1 }}>{e.menu}</div>}
                   <div style={{ fontSize:10, color:t.txm, marginBottom:6 }}>{e.visitDate} · {"★".repeat(e.rating||0)}</div>
-                  {/* 編集トグル */}
                   <button onClick={() => setEditId(editId===e.id ? null : e.id)}
                     style={{ width:"100%", padding:"4px", borderRadius:7, border:`1px solid ${t.br}`, background:t.bg2, color:t.tx, fontSize:10, fontWeight:600, cursor:"pointer" }}>
                     {editId===e.id ? "▲ 閉じる" : "✏️ 編集"}
                   </button>
                 </div>
-                {/* 編集パネル */}
                 {editId === e.id && (
                   <div style={{ padding:"0 10px 10px" }}>
-                    <label style={{ display:"block", textAlign:"center", padding:"7px", background:t.acc, color:"white", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer", marginBottom:6 }}>
+                    {/* 写真追加ボタン */}
+                    <label style={{ display:"block", textAlign:"center", padding:"8px", background:t.acc, color:"white", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer", marginBottom:8 }}>
                       ＋ 写真を追加（複数可）
-                      <input type="file" multiple accept="image/*" hidden onChange={ev => addImages(e.id, ev.target.files)} />
+                      <input type="file" multiple accept="image/*" hidden
+                        onChange={ev => { addImages(e.id, ev.target.files); ev.target.value=""; }}/>
                     </label>
+                    {/* 既存画像リスト */}
                     {(e.images||[]).map((img, idx) => (
-                      <div key={idx} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
-                        <img src={img} alt="" style={{ width:40, height:40, borderRadius:6, objectFit:"cover" }} />
+                      <div key={idx} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
+                        <img src={img} alt="" style={{ width:44, height:44, borderRadius:7, objectFit:"cover", flexShrink:0 }}
+                          onError={ev => { ev.target.src = PLACEHOLDER(); }}/>
+                        <div style={{ flex:1, fontSize:10, color:t.txm }}>{idx+1}枚目</div>
                         <button onClick={() => removeImage(e.id, idx)}
-                          style={{ padding:"3px 8px", borderRadius:6, border:"none", background:"#FFF5F5", color:"#E74C3C", fontSize:10, cursor:"pointer" }}>削除</button>
+                          style={{ padding:"3px 8px", borderRadius:6, border:"none", background:"#FFF5F5", color:"#E74C3C", fontSize:10, cursor:"pointer", fontWeight:600 }}>削除</button>
                       </div>
                     ))}
                   </div>
@@ -696,188 +731,173 @@ function MyPage() {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 画像一括取込 AI振分エンジン
+// 画像一括取込 AI振分エンジン（白画面修正版）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// ラーメンDBの店舗マスター（評価ポイント・ジャンル・エリア付き）
-// 実際の連携: ramendb.supleks.jp の店舗名・ジャンル・エリアを参照して振り分け
+// ── FileReader を Promise でラップ ────────────────────────────
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload  = ev => resolve(ev.target.result);
+    r.onerror = ()  => reject(new Error("FileReader error"));
+    r.readAsDataURL(file);
+  });
+}
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload  = ev => resolve(ev.target.result);
+    r.onerror = ()  => reject(new Error("FileReader error"));
+    r.readAsArrayBuffer(file);
+  });
+}
+
+// ラーメンDBの店舗マスター
 const RAMENDB_MASTER = [
-  { name:"らぁ麺 飯田商店",          genre:"塩",      area:"湯河原",    score:98.5, keywords:["塩","清湯","透明","あっさり","鶏","湯河原"],         id:"119107", menu:["塩らーめん","醤油らーめん","特製塩らーめん"] },
-  { name:"中華そば とみ田",           genre:"つけ麺",  area:"松戸",      score:97.2, keywords:["つけ麺","濃厚","松戸","太麺"],                       id:"3051",   menu:["特製つけ麺","中華そば","つけ麺"] },
-  { name:"Japanese Soba Noodles 蔦",  genre:"醤油",    area:"巣鴨",      score:96.0, keywords:["醤油","高級","ミシュラン","トリュフ"],                id:"58279",  menu:["醤油そば","塩そば","つけそば"] },
-  { name:"麺屋 武蔵",                 genre:"醤油",    area:"新宿",      score:88.5, keywords:["醤油","新宿","チャーシュー","清湯"],                  id:"1",      menu:["武蔵らーめん","特製武蔵らーめん"] },
-  { name:"風雲児",                    genre:"鶏白湯",  area:"代々木",    score:89.3, keywords:["鶏白湯","濃厚","クリーミー","代々木"],                id:"4",      menu:["鶏白湯らーめん","特製鶏白湯"] },
-  { name:"一蘭",                      genre:"豚骨",    area:"渋谷",      score:86.2, keywords:["豚骨","一蘭","個室","半個室","天然とんこつ"],          id:"2",      menu:["天然とんこつラーメン"] },
-  { name:"二郎 三田本店",             genre:"二郎系",  area:"三田",      score:83.0, keywords:["二郎","大","ニンニク","ヤサイ","アブラ","コール"],    id:"8",      menu:["ラーメン(小)","ラーメン(大)"] },
-  { name:"博多一幸舎",                genre:"豚骨",    area:"博多",      score:85.7, keywords:["豚骨","博多","細麺","替え玉","白濁"],                 id:"9",      menu:["博多ラーメン","替え玉"] },
-  { name:"蔦",                        genre:"醤油",    area:"巣鴨",      score:90.8, keywords:["醤油","ミシュラン","高級","巣鴨"],                    id:"10",     menu:["特製醤油そば","特製塩そば"] },
-  { name:"中華そば 青葉",             genre:"中華そば",area:"中野",      score:84.6, keywords:["中華","中野","昔ながら","ダブルスープ"],              id:"7",      menu:["中華そば","特製中華そば"] },
-  { name:"麺処 井の庄",               genre:"煮干し",  area:"石神井公園",score:86.1, keywords:["煮干し","辛辛魚","いわし","ニボシ"],                  id:"15",     menu:["辛辛魚らーめん","煮干しらーめん"] },
-  { name:"塩らーめん 白月",           genre:"塩",      area:"池袋",      score:91.0, keywords:["塩","透明","白","池袋","鶏","あっさり"],              id:"3",      menu:["塩らーめん","特製塩らーめん"] },
-  { name:"斑鳩",                      genre:"醤油",    area:"五反田",    score:87.0, keywords:["醤油","五反田","鶏油","こってり"],                    id:"12",     menu:["醤油らーめん","特製醤油"] },
-  { name:"ほん田",                    genre:"醤油",    area:"東十条",    score:90.1, keywords:["醤油","清湯","東十条","黄金"],                        id:"18",     menu:["醤油ら～めん","塩ら～めん"] },
+  { name:"らぁ麺 飯田商店",         genre:"塩",      area:"湯河原",    score:98.5, keywords:["塩","清湯","透明","あっさり","鶏","湯河原"],       id:"119107", menu:["塩らーめん","醤油らーめん","特製塩らーめん"] },
+  { name:"中華そば とみ田",          genre:"つけ麺",  area:"松戸",      score:97.2, keywords:["つけ麺","濃厚","松戸","太麺"],                     id:"3051",   menu:["特製つけ麺","中華そば","つけ麺"] },
+  { name:"Japanese Soba Noodles 蔦", genre:"醤油",    area:"巣鴨",      score:96.0, keywords:["醤油","高級","ミシュラン","トリュフ"],              id:"58279",  menu:["醤油そば","塩そば","つけそば"] },
+  { name:"麺屋 武蔵",                genre:"醤油",    area:"新宿",      score:88.5, keywords:["醤油","新宿","チャーシュー","清湯"],                id:"1",      menu:["武蔵らーめん","特製武蔵らーめん"] },
+  { name:"風雲児",                   genre:"鶏白湯",  area:"代々木",    score:89.3, keywords:["鶏白湯","濃厚","クリーミー","代々木"],              id:"4",      menu:["鶏白湯らーめん","特製鶏白湯"] },
+  { name:"一蘭",                     genre:"豚骨",    area:"渋谷",      score:86.2, keywords:["豚骨","一蘭","個室","半個室","天然とんこつ"],        id:"2",      menu:["天然とんこつラーメン"] },
+  { name:"二郎 三田本店",            genre:"二郎系",  area:"三田",      score:83.0, keywords:["二郎","大","ニンニク","ヤサイ","アブラ","コール"],  id:"8",      menu:["ラーメン(小)","ラーメン(大)"] },
+  { name:"博多一幸舎",               genre:"豚骨",    area:"博多",      score:85.7, keywords:["豚骨","博多","細麺","替え玉","白濁"],               id:"9",      menu:["博多ラーメン","替え玉"] },
+  { name:"蔦",                       genre:"醤油",    area:"巣鴨",      score:90.8, keywords:["醤油","ミシュラン","高級","巣鴨"],                  id:"10",     menu:["特製醤油そば","特製塩そば"] },
+  { name:"中華そば 青葉",            genre:"中華そば",area:"中野",      score:84.6, keywords:["中華","中野","昔ながら","ダブルスープ"],            id:"7",      menu:["中華そば","特製中華そば"] },
+  { name:"麺処 井の庄",              genre:"煮干し",  area:"石神井公園",score:86.1, keywords:["煮干し","辛辛魚","いわし","ニボシ"],                id:"15",     menu:["辛辛魚らーめん","煮干しらーめん"] },
+  { name:"塩らーめん 白月",          genre:"塩",      area:"池袋",      score:91.0, keywords:["塩","透明","白","池袋","鶏","あっさり"],            id:"3",      menu:["塩らーめん","特製塩らーめん"] },
+  { name:"斑鳩",                     genre:"醤油",    area:"五反田",    score:87.0, keywords:["醤油","五反田","鶏油","こってり"],                  id:"12",     menu:["醤油らーめん","特製醤油"] },
+  { name:"ほん田",                   genre:"醤油",    area:"東十条",    score:90.1, keywords:["醤油","清湯","東十条","黄金"],                      id:"18",     menu:["醤油ら～めん","塩ら～めん"] },
 ];
 
-// ── エキシフ（Exif）からタイムスタンプを取得 ──────────────────
+// ── Exifからタイムスタンプ取得 ────────────────────────────────
 function extractExifDate(arrayBuffer) {
   try {
     const view = new DataView(arrayBuffer);
-    // JPEGマーカー確認
     if (view.getUint16(0) !== 0xFFD8) return null;
     let offset = 2;
-    while (offset < view.byteLength - 1) {
+    while (offset < view.byteLength - 4) {
       const marker = view.getUint16(offset);
-      if (marker === 0xFFE1) { // APP1 = Exif
+      if (marker === 0xFFE1) {
         const exifLen = view.getUint16(offset + 2);
+        if (offset + 4 + exifLen > view.byteLength) break;
         const exifData = new DataView(arrayBuffer, offset + 4, exifLen - 2);
-        // "Exif\0\0" ヘッダー確認
-        if (exifData.getUint32(0) === 0x45786966) {
-          const tiffOffset = 6;
-          const littleEndian = exifData.getUint16(tiffOffset) === 0x4949;
-          const ifdOffset = exifData.getUint32(tiffOffset + 4, littleEndian) + tiffOffset;
-          const numEntries = exifData.getUint16(ifdOffset, littleEndian);
-          for (let i = 0; i < numEntries; i++) {
-            const entryOffset = ifdOffset + 2 + i * 12;
-            const tag = exifData.getUint16(entryOffset, littleEndian);
-            // 0x9003 = DateTimeOriginal
-            if (tag === 0x9003 || tag === 0x0132) {
-              const valOffset = exifData.getUint32(entryOffset + 8, littleEndian) + tiffOffset;
-              let dateStr = "";
-              for (let j = 0; j < 19; j++) {
-                const c = exifData.getUint8(valOffset + j);
-                if (c === 0) break;
-                dateStr += String.fromCharCode(c);
-              }
-              // "YYYY:MM:DD HH:MM:SS" → "YYYY-MM-DD"
-              const m = dateStr.match(/^(\d{4}):(\d{2}):(\d{2})/);
-              if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+        if (exifData.byteLength < 14) break;
+        const tiffOffset = 6;
+        const littleEndian = exifData.getUint16(tiffOffset) === 0x4949;
+        const ifdOffset = exifData.getUint32(tiffOffset + 4, littleEndian) + tiffOffset;
+        if (ifdOffset + 2 > exifData.byteLength) break;
+        const numEntries = exifData.getUint16(ifdOffset, littleEndian);
+        for (let i = 0; i < numEntries; i++) {
+          const entryOffset = ifdOffset + 2 + i * 12;
+          if (entryOffset + 12 > exifData.byteLength) break;
+          const tag = exifData.getUint16(entryOffset, littleEndian);
+          if (tag === 0x9003 || tag === 0x0132) {
+            const valOffset = exifData.getUint32(entryOffset + 8, littleEndian) + tiffOffset;
+            if (valOffset + 19 > exifData.byteLength) break;
+            let dateStr = "";
+            for (let j = 0; j < 19; j++) {
+              const c = exifData.getUint8(valOffset + j);
+              if (c === 0) break;
+              dateStr += String.fromCharCode(c);
             }
+            const m = dateStr.match(/^(\d{4}):(\d{2}):(\d{2})/);
+            if (m) return `${m[1]}-${m[2]}-${m[3]}`;
           }
         }
       }
       if (offset + 2 >= view.byteLength) break;
       const segLen = view.getUint16(offset + 2, false);
+      if (segLen < 2) break;
       offset += 2 + segLen;
     }
   } catch (_) {}
   return null;
 }
 
-// ── 画像の色特徴を簡易抽出（Canvas使用） ──────────────────────
+// ── 画像の色特徴抽出（DataURL使用・ObjectURL不使用） ─────────
 function analyzeImageFeatures(dataUrl) {
   return new Promise(resolve => {
+    // タイムアウト保険（3秒で諦めてnullを返す）
+    const timeout = setTimeout(() => resolve(null), 3000);
     const img = new Image();
     img.onload = () => {
+      clearTimeout(timeout);
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = 32; canvas.height = 32;
+        canvas.width = 16; canvas.height = 16; // さらに小さくして高速化
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, 32, 32);
-        const data = ctx.getImageData(0, 0, 32, 32).data;
-        let r=0, g=0, b=0, brownCount=0, whiteCount=0, darkCount=0, redCount=0;
-        const pixels = 32*32;
+        ctx.drawImage(img, 0, 0, 16, 16);
+        const data = ctx.getImageData(0, 0, 16, 16).data;
+        let brownCount=0, whiteCount=0, darkCount=0;
+        const pixels = 16*16;
         for (let i=0; i<data.length; i+=4) {
-          r += data[i]; g += data[i+1]; b += data[i+2];
-          // 茶色系（豚骨・醤油）
-          if (data[i]>120 && data[i+1]>80 && data[i+1]<140 && data[i+2]<80) brownCount++;
-          // 白系（塩・鶏白湯）
-          if (data[i]>200 && data[i+1]>200 && data[i+2]>200) whiteCount++;
-          // 暗色系（二郎・濃厚）
-          if (data[i]<80 && data[i+1]<80 && data[i+2]<80) darkCount++;
-          // 赤系（辛い・一蘭）
-          if (data[i]>160 && data[i+1]<80 && data[i+2]<80) redCount++;
+          if (data[i]>120 && data[i+1]>80 && data[i+1]<140 && data[i+2]<80)  brownCount++;
+          if (data[i]>200 && data[i+1]>200 && data[i+2]>200)                  whiteCount++;
+          if (data[i]<80  && data[i+1]<80  && data[i+2]<80)                   darkCount++;
         }
-        const avgR = r/pixels, avgG = g/pixels, avgB = b/pixels;
-        resolve({
-          avgR, avgG, avgB,
-          brownRatio: brownCount/pixels,
-          whiteRatio: whiteCount/pixels,
-          darkRatio:  darkCount/pixels,
-          redRatio:   redCount/pixels,
-          brightness: (avgR+avgG+avgB)/3,
-        });
+        resolve({ brownRatio:brownCount/pixels, whiteRatio:whiteCount/pixels, darkRatio:darkCount/pixels });
       } catch(_) { resolve(null); }
     };
-    img.onerror = () => resolve(null);
-    img.src = dataUrl;
+    img.onerror = () => { clearTimeout(timeout); resolve(null); };
+    img.src = dataUrl; // ObjectURLではなくDataURLを直接使用
   });
 }
 
-// ── 重複画像チェック（Data URI の完全一致） ───────────────────
+// ── 重複画像削除 ──────────────────────────────────────────────
 function deduplicateImages(imageList) {
   const seen = new Set();
-  return imageList.filter(img => {
-    if (seen.has(img)) return false;
-    seen.add(img); return true;
-  });
+  return imageList.filter(img => { if (seen.has(img)) return false; seen.add(img); return true; });
 }
 
-// ── AI振分エンジン本体 ────────────────────────────────────────
-// ramendb.supleks.jp のマスターデータと画像特徴・ファイル名・位置情報を
-// 照合して最も確度の高い店舗を返す
-async function aiMatchShop(file, arrayBuffer, location) {
+// ── AI店舗マッチング ─────────────────────────────────────────
+async function aiMatchShop(file, dataUrl, arrayBuffer, location) {
   const fileName = file.name.toLowerCase();
-  const features = await analyzeImageFeatures(URL.createObjectURL(file));
+  // DataURLを直接渡す（URL.createObjectURL廃止）
+  const features = await analyzeImageFeatures(dataUrl);
 
-  let scores = RAMENDB_MASTER.map(shop => {
+  const scored = RAMENDB_MASTER.map(shop => {
     let score = 0;
-
-    // ① ファイル名に店舗名・キーワードが含まれる（最高精度）
     const shopNorm = shop.name.replace(/\s/g,"").toLowerCase();
     if (fileName.includes(shopNorm)) score += 100;
-    shop.keywords.forEach(kw => {
-      if (fileName.includes(kw.toLowerCase())) score += 20;
-    });
-
-    // ② 色特徴によるジャンル推定
+    shop.keywords.forEach(kw => { if (fileName.includes(kw.toLowerCase())) score += 20; });
     if (features) {
-      if (shop.genre === "塩" && features.whiteRatio > 0.3)      score += 30;
-      if (shop.genre === "豚骨" && features.whiteRatio > 0.25)   score += 25;
-      if (shop.genre === "醤油" && features.brownRatio > 0.2)    score += 25;
-      if (shop.genre === "二郎系" && features.darkRatio > 0.15)  score += 30;
-      if (shop.genre === "煮干し" && features.darkRatio > 0.1)   score += 20;
-      if (shop.genre === "鶏白湯" && features.whiteRatio > 0.35) score += 30;
-      // 明るい画像は映え系（高スコア店舗を優遇）
-      if (features.brightness > 150) score += shop.score * 0.1;
+      if (shop.genre === "塩"     && features.whiteRatio  > 0.3)  score += 30;
+      if (shop.genre === "豚骨"   && features.whiteRatio  > 0.25) score += 25;
+      if (shop.genre === "醤油"   && features.brownRatio  > 0.2)  score += 25;
+      if (shop.genre === "二郎系" && features.darkRatio   > 0.15) score += 30;
+      if (shop.genre === "煮干し" && features.darkRatio   > 0.1)  score += 20;
+      if (shop.genre === "鶏白湯" && features.whiteRatio  > 0.35) score += 30;
     }
-
-    // ③ 位置情報エリアとの照合
-    if (location && shop.area) {
-      const areaKeywords = {
-        "新宿":["新宿"], "渋谷":["渋谷"], "池袋":["池袋"],
-        "横浜":["横浜"], "博多":["博多","福岡"], "札幌":["札幌"],
-        "湯河原":["湯河原","神奈川"], "松戸":["松戸","千葉"],
-      };
-      const kws = areaKeywords[shop.area] || [shop.area];
+    if (location) {
+      const areaMap = { "湯河原":["湯河原","神奈川"], "松戸":["松戸","千葉"], "博多":["博多","福岡"], "札幌":["札幌","北海道"] };
+      const kws = areaMap[shop.area] || [shop.area];
       if (kws.some(kw => location.toLowerCase().includes(kw.toLowerCase()))) score += 50;
     }
-
-    // ④ ベーススコア（人気店を若干優遇）
     score += shop.score * 0.05;
-
     return { shop, score };
   });
 
-  scores.sort((a,b) => b.score - a.score);
-  const best = scores[0];
+  scored.sort((a,b) => b.score - a.score);
+  const best = scored[0];
 
-  // スコアが低すぎる場合は「不明」として色特徴でジャンルのみ推定
-  if (best.score < 10) {
+  if (best.score < 8) {
     let genre = "その他", emoji = "🍜";
     if (features) {
-      if (features.whiteRatio > 0.35)  { genre = "塩"; emoji = "🌙"; }
-      else if (features.brownRatio > 0.25) { genre = "醤油"; emoji = "🏆"; }
-      else if (features.darkRatio > 0.15)  { genre = "二郎系"; emoji = "💪"; }
+      if (features.whiteRatio  > 0.35) { genre = "塩";    emoji = "🌙"; }
+      else if (features.brownRatio > 0.25) { genre = "醤油";  emoji = "🏆"; }
+      else if (features.darkRatio  > 0.15) { genre = "二郎系";emoji = "💪"; }
     }
-    return { shopName:"不明のラーメン店", genre, area:"", emoji, ramendbId:null, isUnknown:true, menuCandidates:[] };
+    return { shopName:"不明のラーメン店", genre, area:"", emoji, ramendbId:null, isUnknown:true, menuCandidates:[], confidence:0 };
   }
 
+  const idx = RAMENDB_MASTER.indexOf(best.shop);
+  const emojis = ["✨","🎯","🎌","🏆","☁️","🐷","💪","🔥","🌱","🌿","🎣","🌙","🦉","🍂"];
   return {
     shopName:      best.shop.name,
     genre:         best.shop.genre,
     area:          best.shop.area,
-    score:         best.shop.score,
-    emoji:         ["✨","🎯","🎌","🏆","☁️","🐷","💪","🔥","🌱","🌿","🎣","🌙","🦉","🍂"][RAMENDB_MASTER.indexOf(best.shop) % 14],
+    emoji:         emojis[idx % emojis.length],
     ramendbId:     best.shop.id,
     confidence:    Math.min(Math.round(best.score), 99),
     menuCandidates:best.shop.menu,
@@ -885,155 +905,143 @@ async function aiMatchShop(file, arrayBuffer, location) {
   };
 }
 
-// ── どんぶりスピナー ──────────────────────────────────────────
-function RamenSpinner({ progress, currentFile, total, shopName }) {
+// ── どんぶりスピナー ─────────────────────────────────────────
+// ※ PostModalとは独立したコンポーネント（return で切り替えしない）
+function RamenSpinner({ progress, total, shopName, t }) {
   const [frame, setFrame] = useState(0);
   const frames = ["🍜","🍛","🍲","🍥","🫕"];
   useEffect(() => {
-    const id = setInterval(() => setFrame(f => (f+1) % frames.length), 200);
+    const id = setInterval(() => setFrame(f => (f+1) % frames.length), 180);
     return () => clearInterval(id);
   }, []);
-
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
-      {/* どんぶり回転アニメ */}
-      <div style={{ fontSize:72, animation:"spin 0.6s linear infinite", marginBottom:20, filter:"drop-shadow(0 4px 12px rgba(192,57,43,0.5))" }}>
+    <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.88)", zIndex:300, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, borderRadius:"20px 20px 0 0" }}>
+      <div style={{ fontSize:68, animation:"spin 0.5s linear infinite", marginBottom:18, filter:"drop-shadow(0 4px 12px rgba(192,57,43,0.5))" }}>
         {frames[frame]}
       </div>
-      <div style={{ color:"white", fontWeight:700, fontSize:18, marginBottom:8, fontFamily:"Georgia,serif" }}>
-        AI自動振分中...
-      </div>
+      <div style={{ color:"white", fontWeight:700, fontSize:18, marginBottom:6, fontFamily:"Georgia,serif" }}>AI自動振分中...</div>
       {shopName && (
-        <div style={{ color:"#FADBD8", fontSize:13, marginBottom:16, textAlign:"center", maxWidth:280 }}>
+        <div style={{ color:"#FADBD8", fontSize:12, marginBottom:14, textAlign:"center", maxWidth:240 }}>
           🔍 「{shopName}」を確認中
         </div>
       )}
-      {/* プログレスバー */}
-      <div style={{ width:240, height:6, background:"rgba(255,255,255,0.2)", borderRadius:3, overflow:"hidden", marginBottom:8 }}>
-        <div style={{ height:"100%", background:"linear-gradient(90deg,#E74C3C,#FF6B6B)", width:`${(progress/total)*100}%`, borderRadius:3, transition:"width 0.3s" }}/>
+      <div style={{ width:220, height:5, background:"rgba(255,255,255,0.2)", borderRadius:3, overflow:"hidden", marginBottom:6 }}>
+        <div style={{ height:"100%", background:"linear-gradient(90deg,#E74C3C,#FF6B6B)", width:`${total > 0 ? (progress/total)*100 : 0}%`, borderRadius:3, transition:"width 0.3s" }}/>
       </div>
-      <div style={{ color:"rgba(255,255,255,0.65)", fontSize:12 }}>
-        {progress} / {total} 枚処理中
-      </div>
-      <div style={{ marginTop:20, color:"rgba(255,255,255,0.4)", fontSize:11, textAlign:"center", maxWidth:280 }}>
-        ラーメンデータベースと照合して<br/>自動でアルバムに振り分けています
+      <div style={{ color:"rgba(255,255,255,0.6)", fontSize:12 }}>{progress} / {total} 枚処理中</div>
+      <div style={{ marginTop:18, color:"rgba(255,255,255,0.35)", fontSize:11, textAlign:"center", maxWidth:260, lineHeight:1.7 }}>
+        ラーメンDBと照合して<br/>自動でアルバムに振り分けています
       </div>
     </div>
   );
 }
 
-// ─── 記録モーダル（AI一括取込 完全版） ────────────────────────
+// ─── 記録モーダル（AI一括取込・白画面修正版） ─────────────────
 function PostModal() {
   const { entries, setEntries, setShowPost, t } = useApp();
-  const [loading,      setLoading]      = useState(false);
+  // ローディングをモーダル内オーバーレイで表示（return切り替え廃止）
+  const [aiLoading,    setAiLoading]    = useState(false);
   const [progress,     setProgress]     = useState(0);
   const [totalFiles,   setTotalFiles]   = useState(0);
   const [currentShop,  setCurrentShop]  = useState("");
-  const [result,       setResult]       = useState(null); // 振分結果サマリー
+  const [result,       setResult]       = useState(null);
+  const [location,     setLocation]     = useState(null);
   const [form, setForm] = useState({
     shopName:"", visitDate:new Date().toISOString().slice(0,10),
     rating:5, genre:"醤油", area:"", comment:""
   });
 
-  // 位置情報を取得（任意）
-  const [location, setLocation] = useState(null);
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        pos => setLocation(`lat:${pos.coords.latitude.toFixed(3)},lng:${pos.coords.longitude.toFixed(3)}`),
+        pos => setLocation(`${pos.coords.latitude.toFixed(3)},${pos.coords.longitude.toFixed(3)}`),
         () => {}
       );
     }
   }, []);
 
-  const handleBulkUpload = async (e) => {
-    const files = Array.from(e.target.files);
+  const handleBulkUpload = async (ev) => {
+    const files = Array.from(ev.target.files || []);
+    ev.target.value = ""; // 同じファイルを再選択できるようリセット
     if (!files.length) return;
 
-    setLoading(true);
+    setAiLoading(true);
     setProgress(0);
     setTotalFiles(files.length);
     setCurrentShop("");
 
-    // 現在のentriesをコピー
     const workEntries = entries.map(ent => ({ ...ent, images: [...(ent.images||[])] }));
-    const addedSummary = []; // 結果サマリー用
+    const summary = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setProgress(i + 1);
 
-      // ── ArrayBufferを読み込む（Exif日付取得用）
-      const arrayBuffer = await new Promise(res => {
-        const r = new FileReader(); r.onload = ev => res(ev.target.result); r.readAsArrayBuffer(file);
-      });
-      // ── DataURL（画像表示用）
-      const dataUrl = await new Promise(res => {
-        const r = new FileReader(); r.onload = ev => res(ev.target.result); r.readAsDataURL(file);
-      });
+      try {
+        // DataURLとArrayBufferを並列取得
+        const [dataUrl, arrayBuffer] = await Promise.all([
+          readFileAsDataURL(file),
+          readFileAsArrayBuffer(file),
+        ]);
 
-      // ── タイムスタンプから訪問日を取得
-      const exifDate = extractExifDate(arrayBuffer);
-      const visitDate = exifDate
-        || (file.lastModified ? new Date(file.lastModified).toISOString().slice(0,10) : null)
-        || new Date().toISOString().slice(0,10);
+        const exifDate  = extractExifDate(arrayBuffer);
+        const visitDate = exifDate
+          || (file.lastModified ? new Date(file.lastModified).toISOString().slice(0,10) : null)
+          || new Date().toISOString().slice(0,10);
 
-      // ── AI店舗マッチング
-      const match = await aiMatchShop(file, arrayBuffer, location);
-      setCurrentShop(match.shopName);
+        // AI店舗マッチング（DataURL渡し・ObjectURL廃止）
+        const match = await aiMatchShop(file, dataUrl, arrayBuffer, location);
+        setCurrentShop(match.shopName);
 
-      // ── 既存アルバムを探す（完全一致の店舗名）
-      let existing = workEntries.find(ent => ent.shopName === match.shopName);
+        const existing = workEntries.find(e => e.shopName === match.shopName);
 
-      if (existing) {
-        // ── 重複削除: 同じ画像がすでにある場合はスキップ
-        if (!existing.images.includes(dataUrl)) {
-          existing.images = deduplicateImages([...(existing.images||[]), dataUrl]);
-          addedSummary.push({ shopName:match.shopName, action:"追加", date:visitDate });
+        if (existing) {
+          if (!existing.images.includes(dataUrl)) {
+            existing.images = deduplicateImages([...existing.images, dataUrl]);
+            summary.push({ shopName:match.shopName, action:"追加", date:visitDate });
+          } else {
+            summary.push({ shopName:match.shopName, action:"重複スキップ", date:visitDate });
+          }
         } else {
-          addedSummary.push({ shopName:match.shopName, action:"重複スキップ", date:visitDate });
+          const hour = new Date(file.lastModified || Date.now()).getHours();
+          const menuGuess = match.menuCandidates?.length
+            ? match.menuCandidates[hour % match.menuCandidates.length]
+            : "";
+          workEntries.push({
+            id:         `ai_${Date.now()}_${i}`,
+            shopName:   match.shopName,
+            genre:      match.genre,
+            area:       match.area,
+            emoji:      match.emoji || "🍜",
+            images:     [dataUrl],
+            visitDate,
+            menu:       menuGuess,
+            rating:     4,
+            comment:    match.isUnknown
+              ? "（AI判定：不明）"
+              : `AI振分: ${match.shopName}（信頼度 ${match.confidence}%）`,
+            ramendbId:  match.ramendbId,
+            aiDetected: true,
+            groupId:    "",
+          });
+          summary.push({ shopName:match.shopName, action:"新規作成", date:visitDate, menu:menuGuess, confidence:match.confidence });
         }
-      } else {
-        // ── メニュー名を候補から推定（ファイル名・時間帯ヒューリスティック）
-        let menuGuess = "";
-        const hour = new Date(file.lastModified||Date.now()).getHours();
-        if (match.menuCandidates && match.menuCandidates.length > 0) {
-          // 特製系は夜に多い傾向などを加味してランダム選択（本来はAI判定）
-          menuGuess = match.menuCandidates[hour % match.menuCandidates.length];
-        }
-
-        const newEntry = {
-          id:        `ai_${Date.now()}_${i}`,
-          shopName:  match.shopName,
-          genre:     match.genre,
-          area:      match.area,
-          emoji:     match.emoji || "🍜",
-          images:    [dataUrl],
-          visitDate,
-          menu:      menuGuess,
-          rating:    4,
-          comment:   match.isUnknown ? "（AI判定：不明）" : `AI振分: ${match.shopName}（信頼度 ${match.confidence}%）`,
-          ramendbId: match.ramendbId,
-          aiDetected:true,
-          groupId:   "",
-        };
-        workEntries.push(newEntry);
-        addedSummary.push({ shopName:match.shopName, action:"新規作成", date:visitDate, menu:menuGuess, confidence:match.confidence });
+      } catch (err) {
+        summary.push({ shopName:"エラー", action:"重複スキップ", date:"" });
       }
 
-      // 少し待機してアニメを見せる
-      await new Promise(r => setTimeout(r, 300));
+      // UIを1フレーム更新させる
+      await new Promise(r => setTimeout(r, 50));
     }
 
-    // 全アルバムの重複削除を最終パスで実行
-    const finalEntries = workEntries.map(ent => ({
-      ...ent,
-      images: deduplicateImages(ent.images || [])
+    // 重複最終パス
+    const finalEntries = workEntries.map(e => ({
+      ...e, images: deduplicateImages(e.images || [])
     }));
 
     setEntries(finalEntries);
-    setLoading(false);
-    setResult(addedSummary);
+    setAiLoading(false);
+    setResult(summary);
   };
 
   const handleManual = () => {
@@ -1048,12 +1056,7 @@ function PostModal() {
     color:t.tx, outline:"none", boxSizing:"border-box", marginBottom:10
   };
 
-  // ── ローディング中はスピナーのみ ──────────────────────────
-  if (loading) {
-    return <RamenSpinner progress={progress} currentFile={currentShop} total={totalFiles} shopName={currentShop}/>;
-  }
-
-  // ── 振分結果サマリー ──────────────────────────────────────
+  // ── 振分結果サマリー ────────────────────────────────────────
   if (result) {
     const newCount  = result.filter(r => r.action==="新規作成").length;
     const addCount  = result.filter(r => r.action==="追加").length;
@@ -1067,16 +1070,14 @@ function PostModal() {
             <div style={{ fontWeight:700, fontSize:18, color:t.tx }}>AI振分が完了しました</div>
             <div style={{ fontSize:12, color:t.txm, marginTop:4 }}>ラーメンDBと照合して自動振り分けしました</div>
           </div>
-          {/* サマリーバッジ */}
           <div style={{ display:"flex", gap:8, marginBottom:16, justifyContent:"center" }}>
-            {[["新規アルバム", newCount, t.acc], ["追加", addCount, "#27ae60"], ["重複スキップ", skipCount, t.txm]].map(([label, count, color]) => (
+            {[["新規アルバム",newCount,t.acc],["追加",addCount,"#27ae60"],["スキップ",skipCount,t.txm]].map(([label,count,color]) => (
               <div key={label} style={{ textAlign:"center", background:t.bg2, borderRadius:12, padding:"10px 14px" }}>
                 <div style={{ fontSize:18, fontWeight:700, color }}>{count}</div>
                 <div style={{ fontSize:10, color:t.txm }}>{label}</div>
               </div>
             ))}
           </div>
-          {/* 詳細リスト */}
           <div style={{ marginBottom:16 }}>
             {result.map((r, i) => (
               <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:t.bg2, borderRadius:10, marginBottom:6 }}>
@@ -1084,9 +1085,7 @@ function PostModal() {
                 <div style={{ flex:1 }}>
                   <div style={{ fontWeight:700, fontSize:13, color:t.tx }}>{r.shopName}</div>
                   <div style={{ fontSize:11, color:t.txm }}>
-                    {r.date}
-                    {r.menu ? ` · ${r.menu}` : ""}
-                    {r.confidence ? ` · 信頼度 ${r.confidence}%` : ""}
+                    {r.date}{r.menu?` · ${r.menu}`:""}{r.confidence?` · 信頼度${r.confidence}%`:""}
                   </div>
                 </div>
                 <span style={{ fontSize:10, fontWeight:700, color:r.action==="新規作成"?t.acc:r.action==="追加"?"#27ae60":t.txm, background:t.card, borderRadius:8, padding:"2px 8px" }}>{r.action}</span>
@@ -1102,23 +1101,30 @@ function PostModal() {
     );
   }
 
-  // ── 通常モーダル ──────────────────────────────────────────
+  // ── 通常モーダル（スピナーはオーバーレイで重ねる） ──────────
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:100, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
-      <div style={{ background:t.card, width:"100%", maxWidth:480, borderRadius:"20px 20px 0 0", padding:"0 20px 32px", maxHeight:"85vh", overflowY:"auto" }}>
+      <div style={{ background:t.card, width:"100%", maxWidth:480, borderRadius:"20px 20px 0 0", padding:"0 20px 32px", maxHeight:"85vh", overflowY:"auto", position:"relative" }}>
+
+        {/* スピナーをモーダル内オーバーレイで表示（白画面にならない） */}
+        {aiLoading && (
+          <RamenSpinner progress={progress} total={totalFiles} shopName={currentShop} t={t}/>
+        )}
+
         <div style={{ width:36, height:4, background:t.br, borderRadius:2, margin:"12px auto 16px" }}/>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <h3 style={{ margin:0, color:t.tx }}>🍜 新規記録</h3>
           <button onClick={() => setShowPost(false)} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:t.txm }}>✕</button>
         </div>
 
-        {/* AI一括取込（目立つ場所に配置） */}
-        <label style={{ display:"block", padding:"16px 14px", background:t.grad, borderRadius:14, textAlign:"center", cursor:"pointer", marginBottom:16, position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", inset:0, background:"rgba(255,255,255,0.05)", borderRadius:14 }}/>
+        {/* AI一括取込ボタン */}
+        <label style={{ display:"block", padding:"16px 14px", background:t.grad, borderRadius:14, textAlign:"center", cursor: aiLoading ? "not-allowed":"pointer", marginBottom:16, opacity: aiLoading ? 0.5 : 1 }}>
           <div style={{ fontSize:28, marginBottom:4 }}>🍜</div>
-          <div style={{ color:"white", fontWeight:700, fontSize:14, marginBottom:2 }}>画像を一括取込（AI自動振分）</div>
+          <div style={{ color:"white", fontWeight:700, fontSize:14, marginBottom:2 }}>
+            {aiLoading ? "振分中..." : "画像を一括取込（AI自動振分）"}
+          </div>
           <div style={{ color:"rgba(255,255,255,0.8)", fontSize:11 }}>複数枚選択可 · ラーメンDB照合 · 自動アルバム作成</div>
-          <input type="file" multiple accept="image/*" hidden onChange={handleBulkUpload}/>
+          <input type="file" multiple accept="image/*" hidden onChange={handleBulkUpload} disabled={aiLoading}/>
         </label>
 
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
@@ -1127,7 +1133,7 @@ function PostModal() {
           <div style={{ flex:1, height:1, background:t.br }}/>
         </div>
 
-        {/* 手動入力 */}
+        {/* 手動入力フォーム */}
         <input style={inp} placeholder="店舗名 *" value={form.shopName} onChange={e => setForm(f=>({...f,shopName:e.target.value}))} />
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
           <input type="date" style={{ ...inp, marginBottom:0 }} value={form.visitDate} onChange={e => setForm(f=>({...f,visitDate:e.target.value}))} />
@@ -1145,7 +1151,6 @@ function PostModal() {
           </div>
         </div>
         <textarea style={{ ...inp, minHeight:60, resize:"none" }} placeholder="コメント（任意）" value={form.comment} onChange={e => setForm(f=>({...f,comment:e.target.value}))} />
-
         <button onClick={handleManual}
           style={{ width:"100%", padding:"13px", borderRadius:11, border:"none", background:t.grad, color:"white", fontWeight:700, fontSize:14, cursor:"pointer" }}>
           記録する ✓
@@ -1154,7 +1159,6 @@ function PostModal() {
     </div>
   );
 }
-
 
 // ─── メインレイアウト ─────────────────────────────────────────
 function MainLayout() {
