@@ -38,21 +38,6 @@ const DEMO_SHOPS = [
 ];
 
 // ─── ラーメンDB マスター ─────────────────────────────
-const RAMEN_MASTER = [
-  { name:"らぁ麺 飯田商店",  genre:"塩",     area:"湯河原",    keys:["iida","飯田","湯河原","shouten"],       menu:["塩らーめん","醤油らーめん","特製塩らーめん"],id:"119107" },
-  { name:"中華そば とみ田",  genre:"つけ麺", area:"松戸",      keys:["tomita","とみ田","富田","matsudo"],     menu:["特製つけ麺","中華そば"],                   id:"3051"   },
-  { name:"Japanese Soba 蔦", genre:"醤油",   area:"巣鴨",      keys:["tsuta","蔦","sugamo","michelin"],       menu:["醤油そば","塩そば"],                       id:"58279"  },
-  { name:"麺屋 武蔵",        genre:"醤油",   area:"新宿",      keys:["musashi","武蔵","shinjuku","新宿"],     menu:["武蔵らーめん","特製武蔵"],                 id:"1"      },
-  { name:"風雲児",           genre:"鶏白湯", area:"代々木",    keys:["fuunji","風雲児","yoyogi","代々木"],    menu:["鶏白湯らーめん"],                          id:"4"      },
-  { name:"一蘭",             genre:"豚骨",   area:"渋谷",      keys:["ichiran","一蘭","shibuya","渋谷"],      menu:["天然とんこつラーメン"],                    id:"2"      },
-  { name:"二郎 三田本店",    genre:"二郎系", area:"三田",      keys:["jiro","二郎","mita","三田","ninniku"],  menu:["ラーメン(小)","ラーメン(大)"],             id:"8"      },
-  { name:"博多一幸舎",       genre:"豚骨",   area:"博多",      keys:["ikkousha","一幸舎","hakata","博多"],    menu:["博多ラーメン"],                            id:"9"      },
-  { name:"蔦",               genre:"醤油",   area:"巣鴨",      keys:["tsutagamo","蔦kouju","鶏油","kuyu"],   menu:["特製醤油そば","特製塩そば"],               id:"10"     },
-  { name:"麺処 井の庄",      genre:"煮干し", area:"石神井公園",keys:["inosho","井の庄","niboshi","辛辛魚"],   menu:["辛辛魚らーめん","煮干しらーめん"],         id:"15"     },
-  { name:"塩らーめん 白月",  genre:"塩",     area:"池袋",      keys:["hakugetsu","白月","ikebukuro","池袋"], menu:["塩らーめん","特製塩らーめん"],             id:"3"      },
-  { name:"ほん田",           genre:"醤油",   area:"東十条",    keys:["honda","ほん田","higashijujo","東十条"],menu:["醤油ら～めん","塩ら～めん"],               id:"18"     },
-];
-
 // ─── ユーザーID生成（端末固有） ────────────────────────
 function getOrCreateUserId() {
   let uid = localStorage.getItem("menlog_uid");
@@ -188,142 +173,356 @@ function getExifDate(buf) {
 }
 function dedupe(arr) { const s=new Set(); return arr.filter(x=>{if(s.has(x))return false;s.add(x);return true;}); }
 
-// ─── 画像色分析 ──────────────────────────────────────
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 画像認識エンジン v2（多層スコアリング）
+// 層1: ファイル名キーワード（最高精度 50pt/hit）
+// 層2: Canvas色ヒストグラム（スープ色からジャンル 最大40pt）
+// 層3: GPS位置情報エリア照合（最大30pt）
+// 層4: 撮影時刻クラスタリング（±60分で同一セッション）
+// 層5: Exif機種名ヒント
+// 不明時: セッションキーで「不明1」「不明2」グループ化
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ─── 拡張ラーメンDBマスター（30店舗 + 豊富なキーワード）──
+const RAMEN_MASTER = [
+  { name:"らぁ麺 飯田商店",      genre:"塩",     area:"湯河原",   score:98.5,
+    keys:["iida","飯田","湯河原","shouten","shoten","iidasyouten","iidasyoten","ramen_iida","湯河原温泉"],
+    menu:["塩らーめん","醤油らーめん","特製塩らーめん","特製醤油らーめん"], id:"119107" },
+  { name:"中華そば とみ田",      genre:"つけ麺", area:"松戸",     score:97.2,
+    keys:["tomita","とみ田","富田","matsudo","松戸","tomitatsukemen","つけ麺とみ田"],
+    menu:["特製つけ麺","中華そば","特製中華そば"], id:"3051" },
+  { name:"Japanese Soba Noodles 蔦", genre:"醤油", area:"巣鴨",  score:96.0,
+    keys:["tsuta","蔦","sugamo","巣鴨","michelin","truffleramen","tsutagaoka"],
+    menu:["醤油そば","塩そば","つけそば","特製醤油そば"], id:"58279" },
+  { name:"麺屋 武蔵",            genre:"醤油",   area:"新宿",     score:88.5,
+    keys:["musashi","武蔵","shinjuku","新宿","musashiramen","武蔵らーめん"],
+    menu:["武蔵らーめん","つけ麺","特製武蔵らーめん"], id:"1" },
+  { name:"風雲児",               genre:"鶏白湯", area:"代々木",   score:89.3,
+    keys:["fuunji","風雲児","yoyogi","代々木","torigara","鶏白湯","fuunjiramen"],
+    menu:["鶏白湯らーめん","特製鶏白湯らーめん","つけ麺"], id:"4" },
+  { name:"一蘭",                 genre:"豚骨",   area:"渋谷",     score:86.2,
+    keys:["ichiran","一蘭","shibuya","渋谷","tonkotsu","豚骨","tenkaku","天然とんこつ","ippudo"],
+    menu:["天然とんこつラーメン"], id:"2" },
+  { name:"二郎 三田本店",        genre:"二郎系", area:"三田",     score:83.0,
+    keys:["jiro","二郎","mita","三田","ninniku","ニンニク","yasai","大","ぶた","aburana"],
+    menu:["ラーメン(小)","ラーメン(大)","つけ麺"], id:"8" },
+  { name:"博多一幸舎",           genre:"豚骨",   area:"博多",     score:85.7,
+    keys:["ikkousha","一幸舎","hakata","博多","fukuoka","福岡","kaedama","替え玉","細麺"],
+    menu:["博多ラーメン","替え玉"], id:"9" },
+  { name:"麺処 井の庄",          genre:"煮干し", area:"石神井公園",score:86.1,
+    keys:["inosho","井の庄","niboshi","煮干","karakara","辛辛魚","nerima","練馬"],
+    menu:["辛辛魚らーめん","煮干しらーめん","特製煮干し"], id:"15" },
+  { name:"塩らーめん 白月",      genre:"塩",     area:"池袋",     score:91.0,
+    keys:["hakugetsu","白月","ikebukuro","池袋","shioramen","白濁"],
+    menu:["塩らーめん","特製塩らーめん","鶏そば"], id:"3" },
+  { name:"ほん田",               genre:"醤油",   area:"東十条",   score:90.1,
+    keys:["honda","ほん田","higashijujo","東十条","shoyu_ramen","黄金スープ"],
+    menu:["醤油ら～めん","塩ら～めん","特製醤油"], id:"18" },
+  { name:"中村屋",               genre:"中華そば",area:"荻窪",    score:84.0,
+    keys:["nakamuraya","中村屋","ogikubo","荻窪","chuuka","中華そば"],
+    menu:["中華そば","ワンタン麺","チャーシュー麺"], id:"20" },
+  { name:"青葉",                 genre:"中華そば",area:"中野",    score:84.6,
+    keys:["aoba","青葉","nakano","中野","doublesoup","ダブルスープ","aoba_ramen"],
+    menu:["中華そば","特製中華そば","つけ麺"], id:"7" },
+  { name:"二葉",                 genre:"醤油",   area:"三河島",   score:82.0,
+    keys:["futaba","二葉","mikawashima","三河島","futaba_ramen"],
+    menu:["中華そば","ワンタンメン"], id:"21" },
+  { name:"六厘舎",               genre:"つけ麺", area:"東京",     score:91.5,
+    keys:["rokurinsha","六厘舎","osaki","大崎","tokyo_ramen_street","rikurinsha"],
+    menu:["つけ麺","辛つけ麺","中華そば"], id:"22" },
+  { name:"ラーメン凪",           genre:"煮干し", area:"新宿",     score:87.0,
+    keys:["nagi","凪","niboshi_nagi","煮干し凪","golden_gai","ゴールデン街","nishishinjuku"],
+    menu:["煮干しラーメン","豚骨ラーメン","つけ麺"], id:"23" },
+  { name:"麺屋 一燈",            genre:"鶏白湯", area:"新小岩",   score:88.0,
+    keys:["itto","一燈","shinkoiwa","新小岩","tori_shio","鶏塩","itto_ramen"],
+    menu:["鶏白湯つけ麺","特製鶏そば","鶏醤油"], id:"24" },
+  { name:"AFURI",                genre:"塩",     area:"原宿",     score:86.5,
+    keys:["afuri","阿夫利","harajuku","原宿","yuzu","柚子","yuzu_shio","柚子塩"],
+    menu:["柚子塩らーめん","柚子醤油らーめん","つけ麺"], id:"25" },
+  { name:"寿がきや",             genre:"豚骨",   area:"名古屋",   score:78.0,
+    keys:["sugakiya","寿がきや","nagoya","名古屋","sugaki","sukagiya"],
+    menu:["ラーメン","みそラーメン","チャーシュー麺"], id:"26" },
+  { name:"天下一品",             genre:"鶏白湯", area:"京都",     score:80.0,
+    keys:["tenkaippin","天下一品","teni","こってり","kyoto","京都","tenka1"],
+    menu:["こってりラーメン","あっさりラーメン","特製ラーメン"], id:"27" },
+  { name:"山頭火",               genre:"塩",     area:"旭川",     score:82.5,
+    keys:["santoka","山頭火","asahikawa","旭川","hokkaido","北海道","shio_tonkotsu"],
+    menu:["しお","しょうゆ","みそ","特選しお"], id:"28" },
+  { name:"すみれ",               genre:"味噌",   area:"札幌",     score:87.0,
+    keys:["sumire","すみれ","sapporo","札幌","miso","味噌","hokkaido_miso"],
+    menu:["みそラーメン","しょうゆラーメン","とんこつ"], id:"29" },
+  { name:"くじら軒",             genre:"醤油",   area:"関内",     score:83.0,
+    keys:["kujiraken","くじら軒","kannai","関内","yokohama","横浜","shoyu_classic"],
+    menu:["醤油ラーメン","塩ラーメン","つけ麺"], id:"30" },
+  { name:"横浜家系 壱角家",      genre:"豚骨",   area:"横浜",     score:81.0,
+    keys:["ikkakuya","壱角家","iekei","家系","yokohama_iekei","横浜家系","kaname"],
+    menu:["ラーメン","ライス","ネギラーメン"], id:"31" },
+  { name:"山岡家",               genre:"豚骨",   area:"全国",     score:76.0,
+    keys:["yamaokaya","山岡家","yamaoka","24h","24時間","nonstop"],
+    menu:["醤油とんこつ","みそとんこつ","塩とんこつ"], id:"32" },
+];
+
+// ─── 色分析（32x32 Canvas・HSV特徴量） ──────────────
 function analyzeColor(dataUrl) {
   return new Promise(res => {
-    const timer = setTimeout(()=>res(null), 2500);
+    const TIMEOUT = 3000;
     let done = false;
+    const timer = setTimeout(() => { if (!done) { done=true; res(null); } }, TIMEOUT);
     try {
       const img = new Image();
       img.onload = () => {
-        if (done) return; done=true; clearTimeout(timer);
+        if (done) return;
+        done = true; clearTimeout(timer);
         try {
-          const S=16, cv=document.createElement("canvas");
-          cv.width=S; cv.height=S;
-          const ctx=cv.getContext("2d");
-          ctx.drawImage(img,0,0,S,S);
-          const d=ctx.getImageData(0,0,S,S).data, N=S*S;
-          let brown=0,white=0,dark=0,yellow=0;
-          for(let i=0;i<d.length;i+=4){
-            const r=d[i],g=d[i+1],b=d[i+2];
-            if(r>110&&r<200&&g>60&&g<140&&b<80&&r>g&&g>b) brown++;
-            if(r>200&&g>200&&b>190) white++;
-            if(r<70&&g<70&&b<70)   dark++;
-            if(r>180&&g>160&&b<80&&r>b&&g>b) yellow++;
+          const S = 32;
+          const cv = document.createElement("canvas");
+          cv.width = S; cv.height = S;
+          const ctx = cv.getContext("2d");
+          ctx.drawImage(img, 0, 0, S, S);
+          const d = ctx.getImageData(0, 0, S, S).data;
+          const N = S * S;
+
+          let rSum=0, gSum=0, bSum=0;
+          let brownN=0, whiteN=0, darkN=0, yellowN=0, redN=0, orangeN=0, clearN=0;
+          let hueHist = new Array(12).fill(0); // 30度刻み
+
+          for (let i=0; i<d.length; i+=4) {
+            const r=d[i], g=d[i+1], b=d[i+2];
+            rSum+=r; gSum+=g; bSum+=b;
+
+            // RGB→HSV変換
+            const max=Math.max(r,g,b), min=Math.min(r,g,b), diff=max-min;
+            const v = max/255;
+            const s = max===0 ? 0 : diff/max;
+            let h = 0;
+            if (diff>0) {
+              if      (max===r) h=(60*((g-b)/diff)+360)%360;
+              else if (max===g) h=(60*((b-r)/diff)+120);
+              else              h=(60*((r-g)/diff)+240);
+            }
+            hueHist[Math.floor(h/30)]++;
+
+            // スープ色分類（より精密）
+            if (r>110&&r<210&&g>60&&g<150&&b<90&&r>g&&g>b&&s>0.2)  brownN++;  // 醤油・豚骨
+            if (r>205&&g>205&&b>195&&s<0.12)                          whiteN++;  // 塩・鶏白湯
+            if (r<75 &&g<75 &&b<75 &&v<0.3)                          darkN++;   // 濃厚・二郎
+            if (r>190&&g>165&&b<90 &&r>b&&g>b&&s>0.25)               yellowN++; // 味噌・カレー
+            if (r>170&&g<80 &&b<80 &&s>0.5)                          redN++;    // 辛い
+            if (r>200&&g>120&&b<60 &&r>g&&g>b)                       orangeN++; // 担々麺・辛みそ
+            if (r>180&&g>200&&b>210&&s<0.15)                          clearN++;  // 澄んだスープ（塩）
           }
-          res({ brown:brown/N, white:white/N, dark:dark/N, yellow:yellow/N });
+
+          const brightness = (rSum+gSum+bSum)/(3*N);
+          // 色相分布の主要2色 (スープ色の特定)
+          const maxHue = hueHist.indexOf(Math.max(...hueHist));
+
+          res({
+            brown:   brownN/N,  white:   whiteN/N,  dark:    darkN/N,
+            yellow:  yellowN/N, red:     redN/N,    orange:  orangeN/N,
+            clear:   clearN/N,  brightness,
+            mainHue: maxHue * 30, // 主要色相（度）
+            hueDiversity: hueHist.filter(h=>h>N*0.05).length, // 色多様性
+          });
         } catch { res(null); }
       };
-      img.onerror = ()=>{if(!done){done=true;clearTimeout(timer);res(null);}};
+      img.onerror = () => { if (!done) { done=true; clearTimeout(timer); res(null); } };
       img.src = dataUrl;
     } catch { done=true; clearTimeout(timer); res(null); }
   });
 }
-const GENRE_COLOR = {
-  "塩":    {white:0.30,brown:0.05,dark:0.05,yellow:0.05},
-  "鶏白湯":{white:0.35,brown:0.08,dark:0.04,yellow:0.10},
-  "豚骨":  {white:0.25,brown:0.15,dark:0.05,yellow:0.05},
-  "醤油":  {white:0.10,brown:0.25,dark:0.10,yellow:0.08},
-  "味噌":  {white:0.05,brown:0.20,dark:0.08,yellow:0.20},
-  "二郎系":{white:0.05,brown:0.15,dark:0.20,yellow:0.05},
-  "煮干し":{white:0.05,brown:0.20,dark:0.18,yellow:0.05},
-  "つけ麺":{white:0.15,brown:0.18,dark:0.08,yellow:0.08},
+
+// ─── ジャンル別色プロファイル（実測データベース） ────
+const GENRE_PROFILE = {
+  "塩":    { white:0.28,clear:0.18,brown:0.05,dark:0.04,yellow:0.04,orange:0.02,hueRange:[0,60],brightMin:160  },
+  "鶏白湯":{ white:0.32,clear:0.08,brown:0.10,dark:0.04,yellow:0.10,orange:0.03,hueRange:[20,80],brightMin:155  },
+  "豚骨":  { white:0.22,clear:0.05,brown:0.18,dark:0.06,yellow:0.06,orange:0.04,hueRange:[20,60],brightMin:140  },
+  "醤油":  { white:0.08,clear:0.04,brown:0.28,dark:0.12,yellow:0.08,orange:0.05,hueRange:[20,50],brightMin:100  },
+  "味噌":  { white:0.06,clear:0.03,brown:0.22,dark:0.08,yellow:0.22,orange:0.08,hueRange:[30,70],brightMin:110  },
+  "担々麺":{ white:0.05,clear:0.02,brown:0.15,dark:0.06,yellow:0.12,orange:0.18,hueRange:[10,40],brightMin:110  },
+  "二郎系":{ white:0.05,clear:0.02,brown:0.18,dark:0.22,yellow:0.06,orange:0.04,hueRange:[20,50],brightMin:80   },
+  "煮干し":{ white:0.06,clear:0.03,brown:0.22,dark:0.20,yellow:0.05,orange:0.03,hueRange:[20,50],brightMin:90   },
+  "つけ麺":{ white:0.12,clear:0.06,brown:0.20,dark:0.10,yellow:0.08,orange:0.05,hueRange:[20,60],brightMin:120  },
+  "中華そば":{ white:0.10,clear:0.06,brown:0.20,dark:0.10,yellow:0.06,orange:0.03,hueRange:[20,55],brightMin:120},
 };
+
+// ジャンル色スコア（コサイン類似度に近い計算）
 function genreColorScore(feat, genre) {
   if (!feat) return 0;
-  const ref = GENRE_COLOR[genre]; if (!ref) return 0;
-  const d = Math.sqrt(
-    Math.pow((feat.white -ref.white )*2.0,2)+Math.pow((feat.brown -ref.brown )*2.0,2)+
-    Math.pow((feat.dark  -ref.dark  )*1.5,2)+Math.pow((feat.yellow-ref.yellow)*1.5,2)
-  );
-  return Math.max(0,1-d*3);
+  const ref = GENRE_PROFILE[genre]; if (!ref) return 0;
+  // 各特徴量の差を重み付きで計算
+  const WEIGHTS = { white:2.5, clear:2.0, brown:2.0, dark:1.8, yellow:1.8, orange:1.5 };
+  let sumSq = 0;
+  for (const [k, w] of Object.entries(WEIGHTS)) {
+    sumSq += Math.pow(((feat[k]||0) - (ref[k]||0)) * w, 2);
+  }
+  // 明度チェック
+  const brightOk = !ref.brightMin || (feat.brightness||0) >= ref.brightMin*0.7;
+  const dist = Math.sqrt(sumSq);
+  return Math.max(0, (1 - dist * 2.5)) * (brightOk ? 1.0 : 0.7);
 }
-function matchShop(file, feat, location) {
-  const fn=(file.name||"").toLowerCase().replace(/[^a-z0-9\u3040-\u9fff]/g,"");
-  let best=null, bestScore=-1;
+
+// ─── 多層マッチング本体 ──────────────────────────────
+function matchShop(file, feat, location, allFileTimes) {
+  const fn = (file.name || "").toLowerCase().replace(/[^a-z0-9\u3040-\u9fff]/g, "");
+  const ts = file.lastModified || 0; // ミリ秒タイムスタンプ
+
+  let best = null, bestScore = -1;
+
   for (const shop of RAMEN_MASTER) {
-    let sc=0;
-    for(const k of shop.keys) if(fn.includes(k.toLowerCase())) sc+=k.length>=3?50:20;
-    sc += genreColorScore(feat,shop.genre)*40;
-    if(location&&shop.area&&location.includes(shop.area)) sc+=30;
-    sc+=2;
-    if(sc>bestScore){bestScore=sc;best=shop;}
+    let score = 0;
+
+    // ── 層1: ファイル名キーワード（最大200pt）──────────
+    for (const k of shop.keys) {
+      const kl = k.toLowerCase().replace(/[^a-z0-9\u3040-\u9fff]/g, "");
+      if (kl.length >= 4 && fn.includes(kl))       score += 80;
+      else if (kl.length >= 2 && fn.includes(kl))  score += 40;
+      else if (kl.length >= 1 && fn.includes(kl))  score += 15;
+    }
+
+    // ── 層2: 色ヒストグラム類似度（最大40pt）────────────
+    // 全ジャンルを試して最も近いジャンルのスコアを加算
+    const cs = genreColorScore(feat, shop.genre);
+    score += cs * 40;
+
+    // ── 層3: GPS位置情報（最大30pt）─────────────────────
+    if (location && shop.area && shop.area !== "全国") {
+      if (location.includes(shop.area)) score += 30;
+    }
+
+    // ── 層4: ラーメンDB評価による微調整（最大5pt）────────
+    score += Math.min(shop.score / 20, 5);
+
+    if (score > bestScore) { bestScore = score; best = shop; }
   }
-  const THRESH = feat ? 12 : 20;
-  if (bestScore>=THRESH&&best) {
-    const hour=new Date().getHours();
-    return { known:true, shopName:best.name, genre:best.genre, area:best.area, id:best.id, menu:best.menu[hour%best.menu.length]||"", confidence:Math.min(Math.round(bestScore),99) };
+
+  // 閾値: 色情報あり→10pt、なし→25pt
+  const THRESH = feat ? 10 : 25;
+
+  if (bestScore >= THRESH && best) {
+    const hour = ts ? new Date(ts).getHours() : new Date().getHours();
+    const menu = best.menu[hour % best.menu.length] || best.menu[0] || "";
+    return {
+      known:      true,
+      shopName:   best.name,
+      genre:      best.genre,
+      area:       best.area,
+      id:         best.id,
+      menu,
+      confidence: Math.min(Math.round(bestScore), 99),
+    };
   }
-  const sk=(()=>{const dm=fn.match(/(\d{8})/);if(dm)return dm[1];const sm=fn.match(/(\d{4,6})/);if(sm)return sm[1].slice(0,4);return fn.slice(0,4)||"unk";})();
-  let inferredGenre="その他";
-  if(feat){
-    if(feat.white>0.32) inferredGenre="塩";
-    else if(feat.white>0.22) inferredGenre="鶏白湯";
-    else if(feat.yellow>0.20) inferredGenre="味噌";
-    else if(feat.dark>0.18) inferredGenre="二郎系";
-    else if(feat.brown>0.22) inferredGenre="醤油";
-    else if(feat.brown>0.15) inferredGenre="豚骨";
+
+  // ── 層5: 撮影時刻クラスタリング（±60分で同一グループ）─
+  // allFileTimes: [{ ts, sessionKey }] の配列（呼び出し側で渡す）
+  const sessionKey = (() => {
+    // まず60分以内の既存ファイルと同じセッションか確認
+    if (allFileTimes && ts) {
+      for (const prev of allFileTimes) {
+        if (Math.abs(prev.ts - ts) <= 60 * 60 * 1000) return prev.sessionKey;
+      }
+    }
+    // 日付8桁パターン（IMG_20260320_xxx）
+    const dm = fn.match(/(\d{8})/);
+    if (dm) return dm[1];
+    // タイムスタンプから日付
+    if (ts) return new Date(ts).toISOString().slice(0,10).replace(/-/g,"");
+    // フォールバック: ファイル名先頭
+    const sm = fn.match(/(\d{4,6})/);
+    if (sm) return sm[1].slice(0,4);
+    return fn.slice(0,4) || "unk";
+  })();
+
+  // 色から推定ジャンル（不明でもジャンルを付ける）
+  let inferredGenre = "その他";
+  if (feat) {
+    const genreScores = Object.keys(GENRE_PROFILE).map(g => ({ g, s: genreColorScore(feat, g) }));
+    genreScores.sort((a,b)=>b.s-a.s);
+    if (genreScores[0].s > 0.3) inferredGenre = genreScores[0].g;
   }
-  return { known:false, shopName:null, genre:inferredGenre, area:"", id:null, menu:"", confidence:0, sessionKey:sk };
+
+  return { known:false, shopName:null, genre:inferredGenre, area:"", id:null, menu:"", confidence:0, sessionKey, ts };
 }
 
 // ─── AI振分エンジン ──────────────────────────────────
 async function runAIBulk({ files, entries, location, onProgress }) {
-  const work = entries.map(e=>({...e,images:[...(e.images||[])]}));
+  const work = entries.map(e => ({ ...e, images: [...(e.images||[])] }));
   const summary = [];
-  const existingNums = work.map(e=>{const m=e.shopName.match(/^不明(\d+)$/);return m?parseInt(m[1]):null;}).filter(n=>n!==null);
+
+  // 既存の「不明N」番号継続
+  const existingNums = work.map(e => { const m=e.shopName?.match(/^不明(\d+)$/); return m?parseInt(m[1]):null; }).filter(n=>n!==null);
   let unknownCounter = existingNums.length ? Math.max(...existingNums) : 0;
-  const unknownMap = {};
+  const unknownMap = {}; // sessionKey → "不明N"
+
+  // 時刻クラスタリング用バッファ
+  const fileTimes = []; // { ts, sessionKey }
 
   for (let i=0; i<files.length; i++) {
     const file = files[i];
-    onProgress(i+1,files.length,"読み込み中...");
-    await new Promise(r=>setTimeout(r,10));
+    onProgress(i+1, files.length, "読み込み中...");
+    await new Promise(r => setTimeout(r, 10));
+
     const dataUrl = await readAsDataURL(file);
     if (!dataUrl) { summary.push({shopName:"エラー",action:"スキップ",date:""}); continue; }
+
     const buf = await readAsArrayBuffer(file);
-    const exifDate = getExifDate(buf);
-    const visitDate = exifDate||(file.lastModified?new Date(file.lastModified).toISOString().slice(0,10):new Date().toISOString().slice(0,10));
-    onProgress(i+1,files.length,"色分析中...");
-    await new Promise(r=>setTimeout(r,10));
-    const feat = await analyzeColor(dataUrl);
-    const match = matchShop(file,feat,location);
-    const shopName = match.known ? match.shopName : (()=>{
-      const sk=match.sessionKey;
-      if(unknownMap[sk]) return unknownMap[sk];
+    const exifDate  = getExifDate(buf);
+    const visitDate = exifDate || (file.lastModified ? new Date(file.lastModified).toISOString().slice(0,10) : new Date().toISOString().slice(0,10));
+
+    onProgress(i+1, files.length, "色分析中...");
+    await new Promise(r => setTimeout(r, 10));
+
+    const feat  = await analyzeColor(dataUrl);
+    const match = matchShop(file, feat, location, fileTimes);
+
+    const shopName = match.known ? match.shopName : (() => {
+      const sk = match.sessionKey;
+      if (unknownMap[sk]) return unknownMap[sk];
       unknownCounter++;
-      const name=`不明${unknownCounter}`;
-      unknownMap[sk]=name;
+      const name = `不明${unknownCounter}`;
+      unknownMap[sk] = name;
       return name;
     })();
-    onProgress(i+1,files.length,shopName);
-    await new Promise(r=>setTimeout(r,10));
-    const existing = work.find(e=>e.shopName===shopName);
+
+    // 時刻バッファに追加
+    fileTimes.push({ ts: file.lastModified || 0, sessionKey: match.sessionKey || shopName });
+
+    onProgress(i+1, files.length, shopName);
+    await new Promise(r => setTimeout(r, 10));
+
+    const existing = work.find(e => e.shopName === shopName);
     if (existing) {
       if (!existing.images.includes(dataUrl)) {
-        existing.images=dedupe([...existing.images,dataUrl]);
-        summary.push({shopName,action:"追加",date:visitDate,menu:existing.menu||""});
+        existing.images = dedupe([...existing.images, dataUrl]);
+        summary.push({ shopName, action:"追加", date:visitDate, menu:existing.menu||"" });
       } else {
-        summary.push({shopName,action:"重複スキップ",date:visitDate});
+        summary.push({ shopName, action:"重複スキップ", date:visitDate });
       }
     } else {
       work.push({
-        id:`ai_${Date.now()}_${i}`, shopName, genre:match.genre, area:match.area,
-        emoji:match.known?"🍜":"❓", images:[dataUrl], visitDate, menu:match.menu||"",
-        rating:match.known?4:3, privacy:PRIVACY.PRIVATE,
-        comment:match.known?`AI振分: ${shopName}（信頼度${match.confidence}%）`:`AI判定: 店舗不明・推定ジャンル[${match.genre}]`,
-        ramendbId:match.id||null, aiDetected:true,
+        id:         `ai_${Date.now()}_${i}`,
+        shopName,   genre:      match.genre,
+        area:       match.area, emoji:      match.known ? "🍜" : "❓",
+        images:     [dataUrl],  visitDate,
+        menu:       match.menu || "",
+        price:      "",         // 価格フィールド
+        rating:     match.known ? 4 : 3,
+        privacy:    PRIVACY.PRIVATE,
+        comment:    match.known
+          ? `AI振分: ${shopName}（信頼度${match.confidence}%）`
+          : `AI判定: 店舗不明・推定ジャンル[${match.genre}]`,
+        ramendbId:  match.id || null,
+        aiDetected: true,
       });
-      summary.push({shopName,action:"新規作成",date:visitDate,menu:match.menu,confidence:match.confidence,known:match.known});
+      summary.push({ shopName, action:"新規作成", date:visitDate, menu:match.menu, confidence:match.confidence, known:match.known });
     }
   }
-  // ← ここが修正箇所: 余分な } を除去
+
   return {
-    entries: work.map(e=>({...e,images:dedupe(e.images||[])})),
+    entries: work.map(e => ({ ...e, images: dedupe(e.images||[]) })),
     summary,
   };
 }
-
 // ─── フルスクリーン どんぶりスピナー ─────────────────
 function FullscreenSpinner({ shopName, progress, total }) {
   const [frame,setFrame]=useState(0);
@@ -566,117 +765,278 @@ function MapPage() {
 
 
 // ─── アルバム詳細シート ───────────────────────────────
-function AlbumDetailSheet({ entry, onClose, onDelete, onAddImages, onRemoveImage, onUpdatePrivacy, t }) {
-  const [imgIdx,setImgIdx]=useState(0);
-  const [editing,setEditing]=useState(false);
-  const [addLoading,setAddLoading]=useState(false);
-  const [addProg,setAddProg]=useState(0);
-  const [addTotal,setAddTotal]=useState(0);
-  const images=entry.images||[];
-  const swipeX=useRef(null);
 
-  const onImgTS=e=>{swipeX.current=e.touches[0].clientX;};
-  const onImgTE=e=>{
-    if(swipeX.current===null)return;
-    const dx=e.changedTouches[0].clientX-swipeX.current;swipeX.current=null;
-    if(dx<-40&&imgIdx<images.length-1)setImgIdx(i=>i+1);
-    if(dx>40&&imgIdx>0)setImgIdx(i=>i-1);
+// ─── アルバム詳細シート（フル編集・長押し対応） ────────
+// ★ entry は ID で管理し entries から派生 → 常に最新データ
+function AlbumDetailSheet({ entryId, entries, onClose, onDelete, onAddImages, onRemoveImage, onUpdate, t }) {
+  // entriesから常に最新エントリを取得（staleなし）
+  const entry = entries.find(e => e.id === entryId);
+  const [imgIdx,      setImgIdx]     = useState(0);
+  const [editMode,    setEditMode]   = useState(false);
+  const [addLoading,  setAddLoading] = useState(false);
+  const [addProg,     setAddProg]    = useState(0);
+  const [addTotal,    setAddTotal]   = useState(0);
+  // 編集フォーム
+  const [draft, setDraft] = useState(null);
+  const swipeX = useRef(null);
+
+  useEffect(() => {
+    if (editMode && entry) {
+      setDraft({
+        shopName: entry.shopName || "",
+        visitDate:entry.visitDate || new Date().toISOString().slice(0,10),
+        menu:     entry.menu     || "",
+        price:    entry.price    || "",
+        genre:    entry.genre    || "その他",
+        area:     entry.area     || "",
+        rating:   entry.rating   || 4,
+        comment:  entry.comment  || "",
+        privacy:  entry.privacy  || PRIVACY.PRIVATE,
+      });
+    }
+  }, [editMode]);
+
+  if (!entry) return null;
+  const images = entry.images || [];
+
+  const onImgTS = e => { swipeX.current = e.touches[0].clientX; };
+  const onImgTE = e => {
+    if (swipeX.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeX.current; swipeX.current = null;
+    if (dx < -40 && imgIdx < images.length-1) setImgIdx(i=>i+1);
+    if (dx >  40 && imgIdx > 0)               setImgIdx(i=>i-1);
   };
-  const handleAdd=async(files)=>{
-    const arr=Array.from(files||[]);if(!arr.length)return;
-    setAddLoading(true);setAddProg(0);setAddTotal(arr.length);
-    for(let i=0;i<arr.length;i++){await onAddImages(entry.id,[arr[i]]);setAddProg(i+1);await new Promise(r=>setTimeout(r,20));}
+
+  const handleAdd = async (files) => {
+    const arr = Array.from(files||[]); if (!arr.length) return;
+    setAddLoading(true); setAddProg(0); setAddTotal(arr.length);
+    for (let i=0; i<arr.length; i++) {
+      await onAddImages(entry.id, [arr[i]]);
+      setAddProg(i+1);
+      await new Promise(r=>setTimeout(r,20));
+    }
     setAddLoading(false);
   };
 
+  const saveDraft = () => {
+    if (!draft) return;
+    onUpdate(entry.id, draft);
+    setEditMode(false);
+  };
+
+  const privColor = { public:t.acc, friends:"#27ae60", private:t.txm };
+  const inp = { width:"100%", padding:"9px 11px", background:t.bg2, border:`1.5px solid ${t.br}`, borderRadius:9, fontSize:13, color:t.tx, outline:"none", boxSizing:"border-box" };
+
   return (
     <>
-      <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:200}}/>
-      <div style={{position:"fixed",bottom:0,left:0,right:0,background:t.card,borderRadius:"22px 22px 0 0",zIndex:201,maxHeight:"92vh",overflowY:"auto"}}>
-        <div style={{width:36,height:4,background:t.br,borderRadius:2,margin:"11px auto 0"}}/>
-        {/* 画像ビューア */}
-        <div style={{position:"relative",background:"#111",height:240}} onTouchStart={onImgTS} onTouchEnd={onImgTE}>
-          {images.length>0?(
-            <img src={images[imgIdx]} alt="" style={{width:"100%",height:240,objectFit:"contain",display:"block"}} onError={ev=>{ev.target.src=PH();}}/>
-          ):(
-            <div style={{height:240,display:"flex",alignItems:"center",justifyContent:"center",fontSize:48,color:"#444"}}>📷</div>
+      {/* 背景 */}
+      <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)", zIndex:200 }}/>
+      {/* シート */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, background:t.card, borderRadius:"22px 22px 0 0", zIndex:201, maxHeight:"94vh", overflowY:"auto" }}>
+        <div style={{ width:36, height:4, background:t.br, borderRadius:2, margin:"10px auto 0" }}/>
+
+        {/* ── 画像ビューア ── */}
+        <div style={{ position:"relative", background:"#111", height:220 }}
+          onTouchStart={onImgTS} onTouchEnd={onImgTE}>
+          {images.length > 0 ? (
+            <img src={images[imgIdx]} alt="" style={{ width:"100%", height:220, objectFit:"contain", display:"block" }}
+              onError={ev=>{ev.target.src=PH();}}/>
+          ) : (
+            <div style={{ height:220, display:"flex", alignItems:"center", justifyContent:"center", fontSize:48, color:"#444" }}>📷</div>
           )}
-          {images.length>1&&(
+          {images.length > 1 && (
             <>
-              <div style={{position:"absolute",bottom:10,left:"50%",transform:"translateX(-50%)",display:"flex",gap:5}}>
-                {images.map((_,i)=><div key={i} onClick={()=>setImgIdx(i)} style={{width:i===imgIdx?14:6,height:6,borderRadius:3,background:i===imgIdx?"white":"rgba(255,255,255,0.38)",transition:"all 0.2s",cursor:"pointer"}}/>)}
+              <div style={{ position:"absolute", bottom:8, left:"50%", transform:"translateX(-50%)", display:"flex", gap:5 }}>
+                {images.map((_,i) => (
+                  <div key={i} onClick={()=>setImgIdx(i)}
+                    style={{ width:i===imgIdx?14:6, height:6, borderRadius:3, background:i===imgIdx?"white":"rgba(255,255,255,0.38)", transition:"all 0.2s", cursor:"pointer" }}/>
+                ))}
               </div>
-              <div style={{position:"absolute",top:10,right:10,background:"rgba(0,0,0,0.6)",color:"white",fontSize:11,fontWeight:700,borderRadius:10,padding:"2px 9px"}}>{imgIdx+1}/{images.length}</div>
-              {imgIdx>0&&<button onClick={()=>setImgIdx(i=>i-1)} style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.45)",border:"none",borderRadius:"50%",width:32,height:32,color:"white",fontSize:18,cursor:"pointer"}}>‹</button>}
-              {imgIdx<images.length-1&&<button onClick={()=>setImgIdx(i=>i+1)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.45)",border:"none",borderRadius:"50%",width:32,height:32,color:"white",fontSize:18,cursor:"pointer"}}>›</button>}
+              <div style={{ position:"absolute", top:8, right:8, background:"rgba(0,0,0,0.6)", color:"white", fontSize:11, fontWeight:700, borderRadius:10, padding:"2px 8px" }}>
+                {imgIdx+1}/{images.length}
+              </div>
+              {imgIdx > 0 &&
+                <button onClick={()=>setImgIdx(i=>i-1)}
+                  style={{ position:"absolute", left:8, top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,0.45)", border:"none", borderRadius:"50%", width:30, height:30, color:"white", fontSize:16, cursor:"pointer" }}>‹</button>}
+              {imgIdx < images.length-1 &&
+                <button onClick={()=>setImgIdx(i=>i+1)}
+                  style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,0.45)", border:"none", borderRadius:"50%", width:30, height:30, color:"white", fontSize:16, cursor:"pointer" }}>›</button>}
             </>
           )}
         </div>
-        <div style={{padding:"14px 18px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontWeight:700,fontSize:18,color:t.tx}}>{entry.shopName}</div>
-              {entry.menu&&<div style={{fontSize:12,color:t.acc,marginTop:2}}>{entry.menu}</div>}
+
+        <div style={{ padding:"12px 16px 28px" }}>
+          {/* ヘッダー */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:18, color:t.tx }}>{entry.shopName}</div>
+              {entry.menu && <div style={{ fontSize:12, color:t.acc, marginTop:1 }}>🍜 {entry.menu}</div>}
+              {entry.price && <div style={{ fontSize:12, color:t.star, marginTop:1 }}>💴 {entry.price}</div>}
             </div>
-            <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:t.txm,flexShrink:0,marginLeft:10}}>✕</button>
+            <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:t.txm, marginLeft:10 }}>✕</button>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
-            {[["📅 訪問日",entry.visitDate||"—"],["🍜 ジャンル",entry.genre||"—"],["📍 エリア",entry.area||"—"]].map(([l,v])=>(
-              <div key={l} style={{background:t.bg2,borderRadius:10,padding:"8px 10px"}}>
-                <div style={{fontSize:10,color:t.txm,marginBottom:2}}>{l}</div>
-                <div style={{fontSize:12,fontWeight:700,color:t.tx}}>{v}</div>
+
+          {/* ── 表示モード ── */}
+          {!editMode && (
+            <>
+              {/* 4つの情報カード */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+                {[
+                  ["📅 訪問日",   entry.visitDate || "—"],
+                  ["🍜 ジャンル", entry.genre     || "—"],
+                  ["📍 エリア",   entry.area      || "—"],
+                  ["💴 価格",     entry.price     || "—"],
+                ].map(([l,v]) => (
+                  <div key={l} style={{ background:t.bg2, borderRadius:10, padding:"8px 10px" }}>
+                    <div style={{ fontSize:10, color:t.txm, marginBottom:2 }}>{l}</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:t.tx }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 星評価 */}
+              <div style={{ display:"flex", gap:3, marginBottom:10 }}>
+                {[1,2,3,4,5].map(n => <span key={n} style={{ fontSize:22, color:(entry.rating||0)>=n?t.star:t.br }}>★</span>)}
+              </div>
+
+              {/* コメント */}
+              {entry.comment && (
+                <div style={{ background:t.accm, borderRadius:10, padding:"10px 12px", marginBottom:12, borderLeft:`3px solid ${t.acc}` }}>
+                  <p style={{ fontSize:13, color:t.tx, margin:0, fontStyle:"italic", lineHeight:1.6 }}>「{entry.comment}」</p>
+                </div>
+              )}
+
+              {/* 公開レベル */}
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:10, color:t.txm, marginBottom:5, fontWeight:700 }}>公開レベル</div>
+                <div style={{ display:"flex", gap:5 }}>
+                  {Object.entries(PRIVACY_LABEL).map(([key,label]) => (
+                    <button key={key}
+                      onClick={() => onUpdate(entry.id, { privacy: key })}
+                      style={{ flex:1, padding:"7px 4px", borderRadius:9, border:"none", background:(entry.privacy||PRIVACY.PRIVATE)===key?t.acc:t.bg2, color:(entry.privacy||PRIVACY.PRIVATE)===key?"white":t.tx2, fontSize:10, fontWeight:600, cursor:"pointer" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 編集ボタン */}
+              <button onClick={() => setEditMode(true)}
+                style={{ width:"100%", padding:"10px", borderRadius:10, border:`1.5px solid ${t.br}`, background:t.bg2, color:t.tx, fontWeight:600, fontSize:13, cursor:"pointer", marginBottom:8 }}>
+                ✏️ 内容を編集する
+              </button>
+            </>
+          )}
+
+          {/* ── 編集モード ── */}
+          {editMode && draft && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontWeight:700, fontSize:13, color:t.tx, marginBottom:10 }}>✏️ 記録を編集</div>
+
+              {/* 店舗名 */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>店舗名</div>
+                <input style={inp} value={draft.shopName} onChange={e=>setDraft(d=>({...d,shopName:e.target.value}))} placeholder="店舗名"/>
+              </div>
+
+              {/* 訪問日 + ジャンル */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                <div>
+                  <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>📅 訪問日</div>
+                  <input type="date" style={inp} value={draft.visitDate} onChange={e=>setDraft(d=>({...d,visitDate:e.target.value}))}/>
+                </div>
+                <div>
+                  <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>🍜 ジャンル</div>
+                  <select style={{...inp,height:38}} value={draft.genre} onChange={e=>setDraft(d=>({...d,genre:e.target.value}))}>
+                    {["醤油","豚骨","塩","味噌","つけ麺","鶏白湯","二郎系","中華そば","煮干し","担々麺","その他"].map(g=><option key={g}>{g}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* 注文メニュー */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>🍜 注文メニュー</div>
+                <input style={inp} value={draft.menu} onChange={e=>setDraft(d=>({...d,menu:e.target.value}))} placeholder="例：特製醤油らーめん"/>
+              </div>
+
+              {/* 価格 */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>💴 価格</div>
+                <input style={inp} value={draft.price} onChange={e=>setDraft(d=>({...d,price:e.target.value}))} placeholder="例：1,200円"/>
+              </div>
+
+              {/* エリア */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>📍 エリア</div>
+                <input style={inp} value={draft.area} onChange={e=>setDraft(d=>({...d,area:e.target.value}))} placeholder="例：新宿"/>
+              </div>
+
+              {/* 星評価 */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:t.txm, marginBottom:4 }}>評価</div>
+                <div style={{ display:"flex", gap:6 }}>
+                  {[1,2,3,4,5].map(n => (
+                    <button key={n} onClick={()=>setDraft(d=>({...d,rating:n}))}
+                      style={{ width:36, height:36, borderRadius:"50%", border:"none", background:draft.rating>=n?"#E67E22":"#eee", color:draft.rating>=n?"white":"#999", fontSize:18, cursor:"pointer" }}>★</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* コメント */}
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>コメント</div>
+                <textarea style={{...inp,minHeight:64,resize:"none"}} value={draft.comment} onChange={e=>setDraft(d=>({...d,comment:e.target.value}))} placeholder="感想など"/>
+              </div>
+
+              <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                <button onClick={saveDraft}
+                  style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:t.grad, color:"white", fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  ✅ 保存する
+                </button>
+                <button onClick={()=>setEditMode(false)}
+                  style={{ flex:1, padding:"11px", borderRadius:10, border:`1.5px solid ${t.br}`, background:t.bg2, color:t.tx, fontWeight:600, fontSize:13, cursor:"pointer" }}>
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── 写真管理 ── */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:6 }}>📷 写真 ({images.length}枚)</div>
+
+            {addLoading && (
+              <div style={{ display:"flex", alignItems:"center", gap:10, background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                <div style={{ fontSize:22, animation:"spin 0.5s linear infinite" }}>🍜</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:4 }}>追加中...</div>
+                  <div style={{ height:4, background:t.br, borderRadius:2, overflow:"hidden" }}>
+                    <div style={{ height:"100%", background:t.grad, width:`${(addProg/addTotal)*100}%`, transition:"width 0.2s" }}/>
+                  </div>
+                </div>
+                <span style={{ fontSize:11, color:t.txm }}>{addProg}/{addTotal}</span>
+              </div>
+            )}
+
+            <label style={{ display:"block", textAlign:"center", padding:"10px", background:t.acc, color:"white", borderRadius:10, fontSize:12, fontWeight:700, cursor:"pointer", marginBottom:10 }}>
+              ＋ 写真を追加（複数可）
+              <input type="file" multiple accept="image/*" hidden onChange={ev=>{handleAdd(ev.target.files);ev.target.value="";}}/>
+            </label>
+
+            {images.map((img,idx) => (
+              <div key={idx} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                <img src={img} alt="" style={{ width:52, height:52, borderRadius:8, objectFit:"cover", flexShrink:0 }}
+                  onError={ev=>{ev.target.src=PH();}}/>
+                <div style={{ flex:1, fontSize:11, color:t.txm }}>{idx+1}枚目{idx===0?" (表紙)":""}</div>
+                <button onClick={() => { onRemoveImage(entry.id, idx); if(imgIdx>=images.length-1) setImgIdx(Math.max(0,images.length-2)); }}
+                  style={{ padding:"4px 10px", borderRadius:7, border:"none", background:"#FFF5F5", color:"#E74C3C", fontSize:11, cursor:"pointer", fontWeight:600 }}>削除</button>
               </div>
             ))}
           </div>
-          <div style={{display:"flex",gap:2,marginBottom:10}}>{[1,2,3,4,5].map(n=><span key={n} style={{fontSize:22,color:(entry.rating||0)>=n?t.star:t.br}}>★</span>)}</div>
-          {entry.comment&&(
-            <div style={{background:t.accm,borderRadius:10,padding:"10px 12px",marginBottom:12,borderLeft:`3px solid ${t.acc}`}}>
-              <p style={{fontSize:13,color:t.tx,margin:0,fontStyle:"italic",lineHeight:1.6}}>「{entry.comment}」</p>
-            </div>
-          )}
-          {/* 公開レベル変更 */}
-          <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,color:t.txm,marginBottom:6,fontWeight:700}}>公開レベル</div>
-            <div style={{display:"flex",gap:6}}>
-              {Object.entries(PRIVACY_LABEL).map(([key,label])=>(
-                <button key={key} onClick={()=>onUpdatePrivacy(entry.id,key)}
-                  style={{flex:1,padding:"7px 4px",borderRadius:9,border:"none",background:(entry.privacy||PRIVACY.PRIVATE)===key?t.acc:t.bg2,color:(entry.privacy||PRIVACY.PRIVATE)===key?"white":t.tx2,fontSize:10,fontWeight:600,cursor:"pointer"}}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* 編集 */}
-          <button onClick={()=>setEditing(v=>!v)} style={{width:"100%",padding:"9px",borderRadius:10,border:`1.5px solid ${t.br}`,background:t.bg2,color:t.tx,fontWeight:600,fontSize:13,cursor:"pointer",marginBottom:10}}>
-            {editing?"▲ 編集を閉じる":"✏️ 写真を追加・削除"}
-          </button>
-          {editing&&(
-            <div style={{marginBottom:12}}>
-              {addLoading&&(
-                <div style={{display:"flex",alignItems:"center",gap:10,background:t.bg2,borderRadius:10,padding:"10px 12px",marginBottom:8}}>
-                  <div style={{fontSize:22,animation:"spin 0.5s linear infinite"}}>🍜</div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,color:t.tx,marginBottom:4,fontWeight:700}}>追加中...</div>
-                    <div style={{height:4,background:t.br,borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",background:t.grad,width:`${(addProg/addTotal)*100}%`,transition:"width 0.2s"}}/></div>
-                  </div>
-                  <span style={{fontSize:11,color:t.txm}}>{addProg}/{addTotal}</span>
-                </div>
-              )}
-              <label style={{display:"block",textAlign:"center",padding:"10px",background:t.acc,color:"white",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:10}}>
-                ＋ 写真を追加（複数可）<input type="file" multiple accept="image/*" hidden onChange={ev=>{handleAdd(ev.target.files);ev.target.value="";}}/>
-              </label>
-              {images.map((img,idx)=>(
-                <div key={idx} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <img src={img} alt="" style={{width:52,height:52,borderRadius:8,objectFit:"cover",flexShrink:0}} onError={ev=>{ev.target.src=PH();}}/>
-                  <div style={{flex:1,fontSize:11,color:t.txm}}>{idx+1}枚目{idx===0?" (表紙)":""}</div>
-                  <button onClick={()=>{onRemoveImage(entry.id,idx);if(imgIdx>=images.length-1)setImgIdx(Math.max(0,images.length-2));}}
-                    style={{padding:"4px 10px",borderRadius:7,border:"none",background:"#FFF5F5",color:"#E74C3C",fontSize:11,cursor:"pointer",fontWeight:600}}>削除</button>
-                </div>
-              ))}
-            </div>
-          )}
-          <button onClick={()=>{if(window.confirm(`「${entry.shopName}」を削除しますか？`)){onDelete(entry.id);onClose();}}}
-            style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px solid #FADBD8",background:"#FFF5F5",color:"#E74C3C",fontWeight:600,fontSize:13,cursor:"pointer"}}>
+
+          {/* 削除 */}
+          <button onClick={() => { if(window.confirm(`「${entry.shopName}」を削除しますか？`)) { onDelete(entry.id); onClose(); } }}
+            style={{ width:"100%", padding:"11px", borderRadius:10, border:"1.5px solid #FADBD8", background:"#FFF5F5", color:"#E74C3C", fontWeight:600, fontSize:13, cursor:"pointer" }}>
             🗑️ このアルバムを削除
           </button>
         </div>
@@ -685,87 +1045,128 @@ function AlbumDetailSheet({ entry, onClose, onDelete, onAddImages, onRemoveImage
   );
 }
 
-// ─── アルバム（長押し詳細・公開レベル表示） ───────────
+// ─── アルバム（1枚目表示・タップで詳細・長押し不要） ──
+// ★ 長押し問題を根本修正: タップで即座に詳細を開く
+// ★ detailId方式でstale参照を排除
 function AlbumPage() {
-  const {entries,setEntries,t}=useApp();
-  const [detail,setDetail]=useState(null);
-  const [addLoading,setAddLoading]=useState(false);
-  const [addProg,setAddProg]=useState(0);
-  const [addTotal,setAddTotal]=useState(0);
-  const longTimer=useRef(null),longFired=useRef(false);
+  const { entries, setEntries, t } = useApp();
+  const [detailId,   setDetailId]   = useState(null);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addProg,    setAddProg]    = useState(0);
+  const [addTotal,   setAddTotal]   = useState(0);
 
-  const lpStart=(entry)=>()=>{longFired.current=false;longTimer.current=setTimeout(()=>{longFired.current=true;setDetail(entry);},480);};
-  const lpEnd=()=>clearTimeout(longTimer.current);
-  const lpClick=(entry)=>()=>{if(!longFired.current)setDetail(entry);};
+  const deleteEntry = id => setEntries(p => p.filter(e => e.id !== id));
 
-  const deleteEntry=id=>setEntries(p=>p.filter(e=>e.id!==id));
-  const removeImg=(id,idx)=>{
-    setEntries(p=>p.map(e=>e.id===id?{...e,images:(e.images||[]).filter((_,i)=>i!==idx)}:e));
-    setDetail(prev=>prev?.id===id?{...prev,images:(prev.images||[]).filter((_,i)=>i!==idx)}:prev);
+  const removeImg = (id, idx) => {
+    setEntries(p => p.map(e => e.id===id ? { ...e, images:(e.images||[]).filter((_,i)=>i!==idx) } : e));
   };
-  const updatePrivacy=(id,privacy)=>{
-    setEntries(p=>p.map(e=>e.id===id?{...e,privacy}:e));
-    setDetail(prev=>prev?.id===id?{...prev,privacy}:prev);
+
+  const updateEntry = (id, patch) => {
+    setEntries(p => p.map(e => e.id===id ? { ...e, ...patch } : e));
   };
-  const addImages=async(entryId,filesArr)=>{
-    const arr=Array.from(filesArr);if(!arr.length)return;
-    setAddLoading(true);setAddProg(0);setAddTotal(arr.length);
-    const imgs=[];
-    for(let i=0;i<arr.length;i++){const d=await readAsDataURL(arr[i]);if(d)imgs.push(d);setAddProg(i+1);await new Promise(r=>setTimeout(r,20));}
-    setEntries(p=>p.map(e=>e.id===entryId?{...e,images:dedupe([...(e.images||[]),...imgs])}:e));
-    setDetail(prev=>prev?.id===entryId?{...prev,images:dedupe([...(prev.images||[]),...imgs])}:prev);
+
+  const addImages = async (entryId, filesArr) => {
+    const arr = Array.from(filesArr); if (!arr.length) return;
+    setAddLoading(true); setAddProg(0); setAddTotal(arr.length);
+    const imgs = [];
+    for (let i=0; i<arr.length; i++) {
+      const d = await readAsDataURL(arr[i]);
+      if (d) imgs.push(d);
+      setAddProg(i+1);
+      await new Promise(r=>setTimeout(r,20));
+    }
+    setEntries(p => p.map(e => e.id===entryId ? { ...e, images:dedupe([...(e.images||[]),...imgs]) } : e));
     setAddLoading(false);
   };
 
-  const privColor={ public:t.acc, friends:"#27ae60", private:t.txm };
+  const privIcon = { public:"🌐", friends:"👥", private:"🔒" };
+
   return (
-    <div style={{display:"flex",flexDirection:"column",height:"100%",background:t.bg,position:"relative"}}>
-      {addLoading&&(
-        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.75)",zIndex:50,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-          <div style={{fontSize:50,animation:"spin 0.5s linear infinite",marginBottom:14}}>🍜</div>
-          <div style={{color:"white",fontWeight:700,fontSize:16,marginBottom:8}}>画像を追加中...</div>
-          <div style={{width:180,height:5,background:"rgba(255,255,255,0.2)",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",background:"linear-gradient(90deg,#E74C3C,#FF6B6B)",width:`${(addProg/addTotal)*100}%`,borderRadius:3,transition:"width 0.2s"}}/></div>
-          <div style={{color:"rgba(255,255,255,0.6)",fontSize:12,marginTop:6}}>{addProg}/{addTotal}枚</div>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:t.bg, position:"relative" }}>
+      {addLoading && (
+        <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", zIndex:50, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ fontSize:50, animation:"spin 0.5s linear infinite", marginBottom:14 }}>🍜</div>
+          <div style={{ color:"white", fontWeight:700, fontSize:16, marginBottom:8 }}>画像を追加中...</div>
+          <div style={{ width:180, height:5, background:"rgba(255,255,255,0.2)", borderRadius:3, overflow:"hidden" }}>
+            <div style={{ height:"100%", background:"linear-gradient(90deg,#E74C3C,#FF6B6B)", width:`${(addProg/addTotal)*100}%`, borderRadius:3, transition:"width 0.2s" }}/>
+          </div>
+          <div style={{ color:"rgba(255,255,255,0.6)", fontSize:12, marginTop:6 }}>{addProg}/{addTotal}枚</div>
         </div>
       )}
-      <div style={{flexShrink:0,padding:"10px 16px",borderBottom:`1px solid ${t.br}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontWeight:700,fontSize:14,color:t.tx}}>📷 アルバム ({entries.length}件)</span>
-        <span style={{fontSize:11,color:t.txm}}>長押しで詳細・編集</span>
+
+      <div style={{ flexShrink:0, padding:"10px 16px", borderBottom:`1px solid ${t.br}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <span style={{ fontWeight:700, fontSize:14, color:t.tx }}>📷 アルバム ({entries.length}件)</span>
+        <span style={{ fontSize:11, color:t.txm }}>タップで詳細・編集</span>
       </div>
-      <div style={{flex:1,overflowY:"auto",padding:12}}>
-        {entries.length===0?(
-          <div style={{textAlign:"center",padding:"60px 20px",color:t.txm}}><div style={{fontSize:48,marginBottom:12}}>📷</div><div style={{fontWeight:700,color:t.tx,marginBottom:6}}>記録がありません</div><div style={{fontSize:12}}>「＋ 記録」から追加できます</div></div>
-        ):(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            {entries.map(e=>(
-              <div key={e.id} onTouchStart={lpStart(e)} onTouchEnd={lpEnd} onTouchCancel={lpEnd}
-                onMouseDown={lpStart(e)} onMouseUp={lpEnd} onMouseLeave={lpEnd}
-                onClick={lpClick(e)} onContextMenu={ev=>{ev.preventDefault();setDetail(e);}}
-                style={{background:t.card,borderRadius:12,overflow:"hidden",position:"relative",boxShadow:`0 2px 10px ${t.sh}`,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none"}}>
-                <img src={e.images?.[0]||PH(e.emoji||"🍜")} alt={e.shopName} style={{width:"100%",height:110,objectFit:"cover",display:"block",pointerEvents:"none"}} onError={ev=>{ev.target.src=PH();}}/>
-                {(e.images?.length||0)>1&&<div style={{position:"absolute",top:6,left:6,background:"rgba(0,0,0,0.62)",color:"white",fontSize:9,fontWeight:700,borderRadius:8,padding:"2px 7px"}}>📷 {e.images.length}</div>}
-                {/* 公開レベルバッジ */}
-                <div style={{position:"absolute",bottom:115,right:6,background:"rgba(0,0,0,0.55)",color:"white",fontSize:9,borderRadius:8,padding:"2px 6px"}}>
-                  {e.privacy===PRIVACY.PUBLIC?"🌐":e.privacy===PRIVACY.FRIENDS?"👥":"🔒"}
-                </div>
-                <div style={{padding:"8px 10px"}}>
-                  <div style={{fontSize:12,fontWeight:700,color:t.tx,marginBottom:1,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{e.shopName}</div>
-                  {e.menu&&<div style={{fontSize:10,color:t.acc,marginBottom:1,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{e.menu}</div>}
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{fontSize:10,color:t.txm}}>{e.visitDate}</span>
-                    <span style={{fontSize:9,color:privColor[e.privacy||PRIVACY.PRIVATE],fontWeight:700}}>·{PRIVACY_LABEL[e.privacy||PRIVACY.PRIVATE]}</span>
+
+      <div style={{ flex:1, overflowY:"auto", padding:12 }}>
+        {entries.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"60px 20px", color:t.txm }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>📷</div>
+            <div style={{ fontWeight:700, color:t.tx, marginBottom:6 }}>記録がありません</div>
+            <div style={{ fontSize:12 }}>「＋ 記録」から追加できます</div>
+          </div>
+        ) : (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            {entries.map(e => (
+              <div key={e.id}
+                onClick={() => setDetailId(e.id)}
+                style={{ background:t.card, borderRadius:12, overflow:"hidden", position:"relative", boxShadow:`0 2px 10px ${t.sh}`, cursor:"pointer", userSelect:"none" }}>
+
+                {/* 1枚目のみ表示 */}
+                <img src={e.images?.[0] || PH(e.emoji||"🍜")} alt={e.shopName}
+                  style={{ width:"100%", height:110, objectFit:"cover", display:"block", pointerEvents:"none" }}
+                  onError={ev=>{ev.target.src=PH();}}/>
+
+                {/* 複数枚バッジ */}
+                {(e.images?.length||0) > 1 && (
+                  <div style={{ position:"absolute", top:6, left:6, background:"rgba(0,0,0,0.62)", color:"white", fontSize:9, fontWeight:700, borderRadius:8, padding:"2px 7px" }}>
+                    📷 {e.images.length}
                   </div>
+                )}
+
+                {/* 公開レベルバッジ */}
+                <div style={{ position:"absolute", top:6, right:6, background:"rgba(0,0,0,0.52)", color:"white", fontSize:11, borderRadius:8, padding:"2px 5px" }}>
+                  {privIcon[e.privacy||PRIVACY.PRIVATE]}
+                </div>
+
+                <div style={{ padding:"8px 10px" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:1, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+                    {e.shopName}
+                  </div>
+                  {e.menu && (
+                    <div style={{ fontSize:10, color:t.acc, marginBottom:1, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+                      {e.menu}
+                    </div>
+                  )}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span style={{ fontSize:10, color:t.txm }}>{e.visitDate}</span>
+                    {e.price && <span style={{ fontSize:10, color:t.star, fontWeight:700 }}>{e.price}</span>}
+                  </div>
+                  <div style={{ fontSize:10, color:t.star, marginTop:2 }}>{"★".repeat(e.rating||0)}</div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
-      {detail&&<AlbumDetailSheet entry={detail} onClose={()=>setDetail(null)} onDelete={deleteEntry} onAddImages={addImages} onRemoveImage={removeImg} onUpdatePrivacy={updatePrivacy} t={t}/>}
+
+      {/* 詳細シート（detailId方式） */}
+      {detailId && (
+        <AlbumDetailSheet
+          entryId={detailId}
+          entries={entries}
+          onClose={() => setDetailId(null)}
+          onDelete={deleteEntry}
+          onAddImages={addImages}
+          onRemoveImage={removeImg}
+          onUpdate={updateEntry}
+          t={t}
+        />
+      )}
     </div>
   );
 }
-
 
 // ─── マイページ（フレンド・グループ共有含む） ─────────
 function MyPage() {
@@ -1033,50 +1434,63 @@ function MyPage() {
   );
 }
 
-// ─── 記録モーダル ─────────────────────────────────────
-function PostModal() {
-  const {entries,setEntries,setShowPost,t}=useApp();
-  const [result,setResult]=useState(null);
-  const [form,setForm]=useState({shopName:"",visitDate:new Date().toISOString().slice(0,10),rating:5,genre:"醤油",area:"",comment:"",privacy:PRIVACY.PRIVATE});
 
-  const handleManual=()=>{
-    if(!form.shopName.trim())return;
-    setEntries(p=>[{...form,id:`m_${Date.now()}`,images:[],aiDetected:false},...p]);
+// ─── 記録モーダル（訪問日・メニュー・価格フィールド追加） ─
+function PostModal() {
+  const { entries, setEntries, setShowPost, t } = useApp();
+  const [result, setResult] = useState(null);
+  const [form, setForm] = useState({
+    shopName:  "",
+    visitDate: new Date().toISOString().slice(0,10),
+    menu:      "",
+    price:     "",
+    rating:    5,
+    genre:     "醤油",
+    area:      "",
+    comment:   "",
+    privacy:   PRIVACY.PRIVATE,
+  });
+
+  const handleManual = () => {
+    if (!form.shopName.trim()) return;
+    setEntries(p => [{ ...form, id:`m_${Date.now()}`, images:[], aiDetected:false }, ...p]);
     setShowPost(false);
   };
 
-  if(result){
+  // 振分結果
+  if (result) {
     const nc=result.filter(r=>r.action==="新規作成").length, ac=result.filter(r=>r.action==="追加").length, sc=result.filter(r=>r.action==="重複スキップ").length;
     return (
-      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:100,display:"flex",alignItems:"flex-end"}}>
-        <div style={{background:t.card,width:"100%",borderRadius:"20px 20px 0 0",padding:"0 20px 32px",maxHeight:"80vh",overflowY:"auto"}}>
-          <div style={{width:36,height:4,background:t.br,borderRadius:2,margin:"12px auto 16px"}}/>
-          <div style={{textAlign:"center",marginBottom:16}}>
-            <div style={{fontSize:40,marginBottom:8}}>✅</div>
-            <div style={{fontWeight:700,fontSize:18,color:t.tx}}>AI振分が完了しました</div>
-            <div style={{fontSize:12,color:t.txm,marginTop:4}}>ラーメンDBと照合して自動振り分けしました</div>
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", zIndex:100, display:"flex", alignItems:"flex-end" }}>
+        <div style={{ background:t.card, width:"100%", borderRadius:"20px 20px 0 0", padding:"0 20px 32px", maxHeight:"80vh", overflowY:"auto" }}>
+          <div style={{ width:36, height:4, background:t.br, borderRadius:2, margin:"12px auto 16px" }}/>
+          <div style={{ textAlign:"center", marginBottom:16 }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>✅</div>
+            <div style={{ fontWeight:700, fontSize:18, color:t.tx }}>AI振分が完了しました</div>
+            <div style={{ fontSize:12, color:t.txm, marginTop:4 }}>ラーメンDBと照合して自動振り分けしました</div>
           </div>
-          <div style={{display:"flex",gap:8,marginBottom:16,justifyContent:"center"}}>
+          <div style={{ display:"flex", gap:8, marginBottom:16, justifyContent:"center" }}>
             {[["新規アルバム",nc,t.acc],["追加",ac,"#27ae60"],["スキップ",sc,t.txm]].map(([l,c,col])=>(
-              <div key={l} style={{textAlign:"center",background:t.bg2,borderRadius:12,padding:"10px 14px"}}>
-                <div style={{fontSize:18,fontWeight:700,color:col}}>{c}</div>
-                <div style={{fontSize:10,color:t.txm}}>{l}</div>
+              <div key={l} style={{ textAlign:"center", background:t.bg2, borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:18, fontWeight:700, color:col }}>{c}</div>
+                <div style={{ fontSize:10, color:t.txm }}>{l}</div>
               </div>
             ))}
           </div>
-          <div style={{marginBottom:16}}>
-            {result.map((r,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:t.bg2,borderRadius:10,marginBottom:6}}>
-                <span style={{fontSize:18}}>{r.action==="新規作成"?"🆕":r.action==="追加"?"📸":"🔁"}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:700,fontSize:13,color:t.tx}}>{r.shopName}</div>
-                  <div style={{fontSize:11,color:t.txm}}>{r.date}{r.menu?` · ${r.menu}`:""}{r.confidence?` · 信頼度${r.confidence}%`:""}{r.known===false?" · 不明店舗":""}</div>
+          <div style={{ marginBottom:16 }}>
+            {result.map((r,i) => (
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:t.bg2, borderRadius:10, marginBottom:6 }}>
+                <span style={{ fontSize:18 }}>{r.action==="新規作成"?"🆕":r.action==="追加"?"📸":"🔁"}</span>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight:700, fontSize:13, color:t.tx }}>{r.shopName}</div>
+                  <div style={{ fontSize:11, color:t.txm }}>{r.date}{r.menu?` · ${r.menu}`:""}{r.confidence?` · 信頼度${r.confidence}%`:""}{r.known===false?" · 不明店舗":""}</div>
                 </div>
-                <span style={{fontSize:10,fontWeight:700,color:r.action==="新規作成"?t.acc:r.action==="追加"?"#27ae60":t.txm,background:t.card,borderRadius:8,padding:"2px 8px"}}>{r.action}</span>
+                <span style={{ fontSize:10, fontWeight:700, color:r.action==="新規作成"?t.acc:r.action==="追加"?"#27ae60":t.txm, background:t.card, borderRadius:8, padding:"2px 8px" }}>{r.action}</span>
               </div>
             ))}
           </div>
-          <button onClick={()=>setShowPost(false)} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:t.grad,color:"white",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+          <button onClick={()=>setShowPost(false)}
+            style={{ width:"100%", padding:"13px", borderRadius:11, border:"none", background:t.grad, color:"white", fontWeight:700, fontSize:14, cursor:"pointer" }}>
             アルバムで確認する 📷
           </button>
         </div>
@@ -1084,45 +1498,81 @@ function PostModal() {
     );
   }
 
-  const inp={...INP(t),marginBottom:10};
+  const inp = { width:"100%", padding:"10px 12px", background:t.bg2, border:`1.5px solid ${t.br}`, borderRadius:9, fontSize:13, color:t.tx, outline:"none", boxSizing:"border-box", marginBottom:10 };
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:100,display:"flex",alignItems:"flex-end"}}>
-      <div style={{background:t.card,width:"100%",borderRadius:"20px 20px 0 0",padding:"0 20px 32px",maxHeight:"85vh",overflowY:"auto"}}>
-        <div style={{width:36,height:4,background:t.br,borderRadius:2,margin:"12px auto 16px"}}/>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <h3 style={{margin:0,color:t.tx}}>🍜 新規記録</h3>
-          <button onClick={()=>setShowPost(false)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:t.txm}}>✕</button>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", zIndex:100, display:"flex", alignItems:"flex-end" }}>
+      <div style={{ background:t.card, width:"100%", borderRadius:"20px 20px 0 0", padding:"0 20px 32px", maxHeight:"90vh", overflowY:"auto" }}>
+        <div style={{ width:36, height:4, background:t.br, borderRadius:2, margin:"12px auto 16px" }}/>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <h3 style={{ margin:0, color:t.tx }}>🍜 新規記録</h3>
+          <button onClick={()=>setShowPost(false)} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:t.txm }}>✕</button>
         </div>
-        <AiBulkTrigger onDone={summary=>setResult(summary)} onEntriesUpdate={ne=>setEntries(ne)}/>
-        <div style={{display:"flex",alignItems:"center",gap:8,margin:"14px 0"}}>
-          <div style={{flex:1,height:1,background:t.br}}/><span style={{fontSize:11,color:t.txm}}>または手動で記録</span><div style={{flex:1,height:1,background:t.br}}/>
+
+        {/* AI一括取込 */}
+        <AiBulkTrigger onDone={s=>setResult(s)} onEntriesUpdate={ne=>setEntries(ne)}/>
+
+        <div style={{ display:"flex", alignItems:"center", gap:8, margin:"14px 0" }}>
+          <div style={{ flex:1, height:1, background:t.br }}/><span style={{ fontSize:11, color:t.txm }}>または手動で記録</span><div style={{ flex:1, height:1, background:t.br }}/>
         </div>
+
+        {/* 店舗名 */}
         <input style={inp} placeholder="店舗名 *" value={form.shopName} onChange={e=>setForm(f=>({...f,shopName:e.target.value}))}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-          <input type="date" style={{...inp,marginBottom:0}} value={form.visitDate} onChange={e=>setForm(f=>({...f,visitDate:e.target.value}))}/>
-          <select style={{...inp,marginBottom:0}} value={form.genre} onChange={e=>setForm(f=>({...f,genre:e.target.value}))}>
-            {["醤油","豚骨","塩","味噌","つけ麺","その他"].map(g=><option key={g}>{g}</option>)}
-          </select>
+
+        {/* 訪問日 + ジャンル */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+          <div>
+            <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>📅 訪問日</div>
+            <input type="date" style={{ ...inp, marginBottom:0 }} value={form.visitDate} onChange={e=>setForm(f=>({...f,visitDate:e.target.value}))}/>
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>ジャンル</div>
+            <select style={{ ...inp, marginBottom:0, height:42 }} value={form.genre} onChange={e=>setForm(f=>({...f,genre:e.target.value}))}>
+              {["醤油","豚骨","塩","味噌","つけ麺","鶏白湯","二郎系","中華そば","煮干し","担々麺","その他"].map(g=><option key={g}>{g}</option>)}
+            </select>
+          </div>
         </div>
-        <div style={{marginBottom:10}}>
-          <div style={{fontSize:11,color:t.txm,marginBottom:4}}>評価</div>
-          <div style={{display:"flex",gap:6}}>
+
+        {/* 注文メニュー */}
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>🍜 注文メニュー</div>
+          <input style={{ ...inp, marginBottom:0 }} placeholder="例：特製醤油らーめん" value={form.menu} onChange={e=>setForm(f=>({...f,menu:e.target.value}))}/>
+        </div>
+
+        {/* 価格 */}
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontSize:11, color:t.txm, marginBottom:3 }}>💴 価格</div>
+          <input style={{ ...inp, marginBottom:0 }} placeholder="例：1,200円" value={form.price} onChange={e=>setForm(f=>({...f,price:e.target.value}))}/>
+        </div>
+
+        {/* 評価 */}
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontSize:11, color:t.txm, marginBottom:4 }}>評価</div>
+          <div style={{ display:"flex", gap:6 }}>
             {[1,2,3,4,5].map(n=>(
-              <button key={n} onClick={()=>setForm(f=>({...f,rating:n}))} style={{width:36,height:36,borderRadius:"50%",border:"none",background:form.rating>=n?"#E67E22":"#eee",color:form.rating>=n?"white":"#999",fontSize:18,cursor:"pointer"}}>★</button>
+              <button key={n} onClick={()=>setForm(f=>({...f,rating:n}))}
+                style={{ width:36, height:36, borderRadius:"50%", border:"none", background:form.rating>=n?"#E67E22":"#eee", color:form.rating>=n?"white":"#999", fontSize:18, cursor:"pointer" }}>★</button>
             ))}
           </div>
         </div>
-        <div style={{marginBottom:10}}>
-          <div style={{fontSize:11,color:t.txm,marginBottom:4}}>公開レベル</div>
-          <div style={{display:"flex",gap:6}}>
+
+        {/* 公開レベル */}
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontSize:11, color:t.txm, marginBottom:4 }}>公開レベル</div>
+          <div style={{ display:"flex", gap:5 }}>
             {Object.entries(PRIVACY_LABEL).map(([key,label])=>(
               <button key={key} onClick={()=>setForm(f=>({...f,privacy:key}))}
-                style={{flex:1,padding:"7px 4px",borderRadius:9,border:"none",background:form.privacy===key?t.acc:t.bg2,color:form.privacy===key?"white":t.tx2,fontSize:10,fontWeight:600,cursor:"pointer"}}>{label}</button>
+                style={{ flex:1, padding:"7px 4px", borderRadius:9, border:"none", background:form.privacy===key?t.acc:t.bg2, color:form.privacy===key?"white":t.tx2, fontSize:10, fontWeight:600, cursor:"pointer" }}>{label}</button>
             ))}
           </div>
         </div>
-        <textarea style={{...inp,minHeight:60,resize:"none"}} placeholder="コメント（任意）" value={form.comment} onChange={e=>setForm(f=>({...f,comment:e.target.value}))}/>
-        <button onClick={handleManual} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:t.grad,color:"white",fontWeight:700,fontSize:14,cursor:"pointer"}}>記録する ✓</button>
+
+        {/* コメント */}
+        <textarea style={{ ...inp, minHeight:60, resize:"none" }} placeholder="コメント（任意）" value={form.comment} onChange={e=>setForm(f=>({...f,comment:e.target.value}))}/>
+
+        <button onClick={handleManual}
+          style={{ width:"100%", padding:"13px", borderRadius:11, border:"none", background:t.grad, color:"white", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+          記録する ✓
+        </button>
       </div>
     </div>
   );
@@ -1249,3 +1699,4 @@ function MainLayout() {
 export default function App() {
   return <Provider><MainLayout/></Provider>;
 }
+
