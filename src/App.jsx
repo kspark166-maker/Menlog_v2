@@ -968,146 +968,141 @@ function AlbumDetail({ entryId, entries, onClose, onDelete, onAddImages, onRemov
         <div style={{ flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch" }}
           onTouchStart={onAlbumTS} onTouchEnd={onAlbumTE}>
 
-          {/* ── 写真セクション ── */}
-          <div style={{ padding:"14px 14px 0" }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:8 }}>📷 写真</div>
+          {/* ─────────────────────────────────────
+              ① 上部：詳細情報セクション
+          ───────────────────────────────────── */}
+          <div style={{ padding:"12px 14px 0" }}>
 
-            {/* 画像追加中インジケーター */}
+            {/* 店舗名 */}
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:9, color:t.txm, fontWeight:700, marginBottom:2 }}>🏪 店舗名</div>
+              <div style={{ fontSize:20, fontWeight:800, color:t.tx, lineHeight:1.25 }}>{D(entry.shopName)}</div>
+            </div>
+
+            {/* 品名 + 価格 */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+              <div style={{ background:t.bg2, borderRadius:9, padding:"8px 10px" }}>
+                <div style={{ fontSize:9, color:t.txm, fontWeight:700, marginBottom:3 }}>🍜 品名</div>
+                <div style={{ fontSize:12, fontWeight:700, color:entry.menu?t.acc:t.txm, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{D(entry.menu)}</div>
+              </div>
+              <div style={{ background:t.bg2, borderRadius:9, padding:"8px 10px" }}>
+                <div style={{ fontSize:9, color:t.txm, fontWeight:700, marginBottom:3 }}>💴 価格</div>
+                <div style={{ fontSize:12, fontWeight:700, color:entry.price?t.star:t.txm }}>{D(entry.price)}</div>
+              </div>
+            </div>
+
+            {/* 訪問日 / ジャンル / エリア */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:8 }}>
+              {[
+                ["📅","訪問日",  entry.visitDate],
+                ["🍜","ジャンル",entry.genre   ],
+                ["📍","エリア",  entry.area     ],
+              ].map(([ico,lbl,val])=>(
+                <div key={lbl} style={{ background:t.bg2, borderRadius:9, padding:"7px 4px", textAlign:"center" }}>
+                  <div style={{ fontSize:13, marginBottom:1 }}>{ico}</div>
+                  <div style={{ fontSize:8, color:t.txm, marginBottom:1 }}>{lbl}</div>
+                  <div style={{ fontSize:10, fontWeight:700, color:val?t.tx:t.txm, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis", padding:"0 2px" }}>{D(val)}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 評価 */}
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+              <div style={{ fontSize:9, color:t.txm, fontWeight:700, flexShrink:0 }}>⭐ 評価</div>
+              {entry.rating ? (
+                <div style={{ display:"flex", gap:2 }}>
+                  {[1,2,3,4,5].map(n=>(
+                    <span key={n} style={{ fontSize:20, color:(entry.rating||0)>=n?t.star:t.br, lineHeight:1 }}>★</span>
+                  ))}
+                </div>
+              ) : <span style={{ fontSize:11, color:t.txm }}>—</span>}
+            </div>
+
+            {/* コメント */}
+            <div style={{ background:t.bg2, borderRadius:9, padding:"8px 10px", marginBottom:8 }}>
+              <div style={{ fontSize:9, color:t.txm, fontWeight:700, marginBottom:4 }}>💬 レビュー・コメント</div>
+              {entry.comment ? (
+                <p style={{ fontSize:13, color:t.tx, margin:0, lineHeight:1.65, borderLeft:`3px solid ${t.acc}`, paddingLeft:8 }}>{entry.comment}</p>
+              ) : (
+                <div style={{ fontSize:11, color:t.txm }}>—（編集から追加できます）</div>
+              )}
+            </div>
+
+            {/* 公開設定 */}
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:9, color:t.txm, fontWeight:700, marginBottom:5 }}>🔐 公開設定</div>
+              <div style={{ display:"flex", gap:5 }}>
+                {PRIV_OPTS.map(([key,lbl,col])=>(
+                  <button key={key} onClick={()=>onUpdate(entry.id,{privacy:key})}
+                    style={{ flex:1, padding:"7px 2px", borderRadius:8, border:"none",
+                      background:(entry.privacy||PRIVACY.PRIVATE)===key?col:t.bg2,
+                      color:(entry.privacy||PRIVACY.PRIVATE)===key?"white":t.tx2,
+                      fontSize:9, fontWeight:700, cursor:"pointer" }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ height:1, background:t.br, margin:"2px 14px 10px" }}/>
+
+          {/* ─────────────────────────────────────
+              ② 下部：写真サムネイル（2列・縦スクロール）
+          ───────────────────────────────────── */}
+          <div style={{ padding:"0 14px" }}>
+            <div style={{ fontSize:9, color:t.txm, fontWeight:700, marginBottom:6 }}>
+              📷 写真　<span style={{ fontWeight:400 }}>（長押しで拡大）</span>
+            </div>
+
             {addLoading && (
-              <div style={{ display:"flex", alignItems:"center", gap:10, background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
-                <div style={{ fontSize:20, animation:"spin 0.5s linear infinite" }}>🍜</div>
+              <div style={{ display:"flex", alignItems:"center", gap:8, background:t.bg2, borderRadius:9, padding:"8px 10px", marginBottom:8 }}>
+                <div style={{ fontSize:18, animation:"spin 0.5s linear infinite" }}>🍜</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:11, fontWeight:700, color:t.tx }}>追加中... {addProg}/{addTotal}</div>
-                  <div style={{ height:4, background:t.br, borderRadius:2, overflow:"hidden", marginTop:4 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:t.tx }}>追加中... {addProg}/{addTotal}</div>
+                  <div style={{ height:3, background:t.br, borderRadius:2, overflow:"hidden", marginTop:3 }}>
                     <div style={{ height:"100%", background:t.grad, width:`${addTotal>0?(addProg/addTotal)*100:0}%`, borderRadius:2, transition:"width 0.2s" }}/>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 2列サムネイルグリッド */}
             {images.length > 0 ? (
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:7, marginBottom:10 }}>
                 {images.map((img, i) => (
-                  <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", boxShadow:`0 2px 8px ${t.sh}`, aspectRatio:"1/1" }}
+                  <div key={i} style={{ position:"relative", borderRadius:9, overflow:"hidden", boxShadow:`0 2px 6px ${t.sh}`, height:100 }}
                     onMouseDown={()=>startImgLP(i)} onMouseUp={cancelImgLP} onMouseLeave={cancelImgLP}
                     onTouchStart={()=>startImgLP(i)} onTouchEnd={cancelImgLP} onTouchMove={moveImgLP}>
-                    <img src={img} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}
+                    <img src={img} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
                       onError={ev=>{ev.target.src=PH();}}/>
-                    {/* 表紙バッジ */}
                     {i===0 && (
-                      <div style={{ position:"absolute", top:6, left:6, background:t.grad, color:"white", fontSize:9, fontWeight:700, borderRadius:6, padding:"2px 7px" }}>表紙</div>
+                      <div style={{ position:"absolute", top:4, left:4, background:t.grad, color:"white", fontSize:8, fontWeight:700, borderRadius:5, padding:"1px 6px" }}>表紙</div>
                     )}
-                    {/* 削除ボタン */}
-                    <button onClick={()=>{ onRemoveImage(entry.id, i); if(imgIdx>=images.length-1) setImgIdx(Math.max(0,images.length-2)); }}
-                      style={{ position:"absolute", top:5, right:5, background:"rgba(231,76,60,0.88)", border:"none", borderRadius:"50%", width:24, height:24, color:"white", fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
-                    {/* 長押しヒント */}
-                    <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.4)", color:"white", fontSize:9, textAlign:"center", padding:"3px 0" }}>長押しで拡大</div>
+                    <button onClick={e=>{e.stopPropagation(); onRemoveImage(entry.id, i); if(imgIdx>=images.length-1) setImgIdx(Math.max(0,images.length-2));}}
+                      style={{ position:"absolute", top:4, right:4, background:"rgba(231,76,60,0.88)", border:"none", borderRadius:"50%", width:22, height:22, color:"white", fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>×</button>
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ background:t.bg2, borderRadius:12, padding:"20px", textAlign:"center", color:t.txm, marginBottom:10 }}>
-                <div style={{ fontSize:32, marginBottom:6 }}>📷</div>
-                <div style={{ fontSize:12 }}>写真なし</div>
+              <div style={{ background:t.bg2, borderRadius:9, padding:"16px", textAlign:"center", color:t.txm, marginBottom:10 }}>
+                <div style={{ fontSize:28, marginBottom:4 }}>📷</div>
+                <div style={{ fontSize:11 }}>写真なし</div>
               </div>
             )}
 
-            {/* 写真追加ボタン */}
-            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, padding:"11px", background:t.accm, border:`1.5px dashed ${t.acc}`, borderRadius:10, color:t.acc, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:14 }}>
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:5, padding:"10px", background:t.accm, border:`1.5px dashed ${t.acc}`, borderRadius:9, color:t.acc, fontWeight:700, fontSize:12, cursor:"pointer", marginBottom:10 }}>
               ＋ 写真を追加（複数可）
               <input type="file" multiple accept="image/*" hidden onChange={ev=>{handleAddPhotos(ev.target.files);ev.target.value="";}}/>
             </label>
-          </div>
 
-          <div style={{ height:1, background:t.br, margin:"0 14px 14px" }}/>
-
-          {/* ── 詳細情報セクション ── */}
-          <div style={{ padding:"0 14px" }}>
-
-            {/* 店舗名 */}
-            <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:3 }}>🏪 店舗名</div>
-              <div style={{ fontSize:18, fontWeight:800, color:t.tx, lineHeight:1.3 }}>{D(entry.shopName)}</div>
-            </div>
-
-            {/* 品名 + 価格 横並び */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-              <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px" }}>
-                <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:4 }}>🍜 品名</div>
-                <div style={{ fontSize:13, fontWeight:700, color:entry.menu?t.acc:t.txm }}>{D(entry.menu)}</div>
-              </div>
-              <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px" }}>
-                <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:4 }}>💴 価格</div>
-                <div style={{ fontSize:13, fontWeight:700, color:entry.price?t.star:t.txm }}>{D(entry.price)}</div>
-              </div>
-            </div>
-
-            {/* 訪問日 / ジャンル / エリア */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
-              {[
-                ["📅","訪問日",  entry.visitDate],
-                ["🍜","ジャンル",entry.genre   ],
-                ["📍","エリア",  entry.area     ],
-              ].map(([ico,lbl,val])=>(
-                <div key={lbl} style={{ background:t.bg2, borderRadius:10, padding:"9px 6px", textAlign:"center" }}>
-                  <div style={{ fontSize:14, marginBottom:2 }}>{ico}</div>
-                  <div style={{ fontSize:9, color:t.txm, marginBottom:2 }}>{lbl}</div>
-                  <div style={{ fontSize:11, fontWeight:700, color:val?t.tx:t.txm }}>{D(val)}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* 評価 */}
-            <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
-              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:6 }}>⭐ 評価</div>
-              {entry.rating ? (
-                <div style={{ display:"flex", gap:3 }}>
-                  {[1,2,3,4,5].map(n=>(
-                    <span key={n} style={{ fontSize:26, color:(entry.rating||0)>=n?t.star:t.br, lineHeight:1 }}>★</span>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ fontSize:12, color:t.txm }}>—</div>
-              )}
-            </div>
-
-            {/* レビュー・コメント */}
-            <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:14 }}>
-              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:6 }}>💬 レビュー・コメント</div>
-              {entry.comment ? (
-                <p style={{ fontSize:14, color:t.tx, margin:0, lineHeight:1.75, borderLeft:`3px solid ${t.acc}`, paddingLeft:10 }}>
-                  {entry.comment}
-                </p>
-              ) : (
-                <div style={{ fontSize:12, color:t.txm }}>— （編集から追加できます）</div>
-              )}
-            </div>
-
-            {/* 公開設定 */}
-            <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:6 }}>🔐 公開設定</div>
-              <div style={{ display:"flex", gap:6 }}>
-                {PRIV_OPTS.map(([key,lbl,col])=>(
-                  <button key={key} onClick={()=>onUpdate(entry.id,{privacy:key})}
-                    style={{ flex:1, padding:"9px 4px", borderRadius:9, border:"none",
-                      background:(entry.privacy||PRIVACY.PRIVATE)===key?col:t.bg2,
-                      color:(entry.privacy||PRIVACY.PRIVATE)===key?"white":t.tx2,
-                      fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 削除ボタン */}
             <button onClick={()=>{ if(window.confirm(`「${entry.shopName}」を削除しますか？`)){onDelete(entry.id);onClose();} }}
-              style={{ width:"100%", padding:"12px", borderRadius:10, border:"1.5px solid #FADBD8", background:"#FFF5F5", color:"#E74C3C", fontWeight:600, fontSize:13, cursor:"pointer", marginBottom:24 }}>
+              style={{ width:"100%", padding:"11px", borderRadius:9, border:"1.5px solid #FADBD8", background:"#FFF5F5", color:"#E74C3C", fontWeight:600, fontSize:12, cursor:"pointer", marginBottom:20 }}>
               🗑️ このアルバムを削除
             </button>
           </div>
         </div>
       )}
+
 
       {/* ══════════════════════════════════════════
           ── 編集モード ──
@@ -1476,6 +1471,32 @@ function MyPage() {
   const [friendCode,setFriendCode]=useState("");
   const [friendMsg,setFriendMsg]=useState("");
   const [showInvite,setShowInvite]=useState(null);
+  // ── 日記詳細（長押し） ──
+  const [detailId, setDetailId] = useState(null);
+  const mpLpTimer  = useRef(null);
+  const mpLpFired  = useRef(false);
+  const mpLpMoved  = useRef(false);
+  const startMpLP  = (id) => {
+    mpLpFired.current=false; mpLpMoved.current=false;
+    mpLpTimer.current=setTimeout(()=>{
+      if(mpLpMoved.current)return;
+      mpLpFired.current=true;
+      if(navigator.vibrate)navigator.vibrate(30);
+      setDetailId(id);
+    },480);
+  };
+  const cancelMpLP = ()=>{ clearTimeout(mpLpTimer.current); mpLpTimer.current=null; };
+  const moveMpLP   = ()=>{ mpLpMoved.current=true; cancelMpLP(); };
+
+  const deleteEntry = id => setEntries(p=>p.filter(e=>e.id!==id));
+  const removeImg   = (id,idx) => setEntries(p=>p.map(e=>e.id===id?{...e,images:(e.images||[]).filter((_,i)=>i!==idx)}:e));
+  const updateEntry = (id,patch) => setEntries(p=>p.map(e=>e.id===id?{...e,...patch}:e));
+  const addImages   = async(entryId,filesArr)=>{
+    const arr=Array.from(filesArr);if(!arr.length)return;
+    const imgs=[];
+    for(let i=0;i<arr.length;i++){const d=await readAsDataURL(arr[i]);if(d)imgs.push(d);}
+    setEntries(p=>p.map(e=>e.id===entryId?{...e,images:dedupe([...(e.images||[]),...imgs])}:e));
+  };
 
   const filtered=entries.filter(e=>{
     if(filterG!=="すべて"&&e.groupId!==filterG)return false;
@@ -1499,6 +1520,19 @@ function MyPage() {
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%",background:t.bg}}>
+      {/* AlbumDetail オーバーレイ */}
+      {detailId && (
+        <AlbumDetail
+          entryId={detailId}
+          entries={entries}
+          onClose={()=>setDetailId(null)}
+          onDelete={(id)=>{deleteEntry(id);setDetailId(null);}}
+          onAddImages={addImages}
+          onRemoveImage={removeImg}
+          onUpdate={updateEntry}
+          t={t}
+        />
+      )}
       {/* ヘッダー */}
       <div style={{flexShrink:0,background:t.grad,padding:"16px",color:"white"}}>
         <div style={{fontWeight:700,fontSize:20,fontFamily:"Georgia,serif"}}>{profile.name}</div>
@@ -1573,15 +1607,20 @@ function MyPage() {
               </div>
             </section>
 
-            <div style={{fontWeight:700,fontSize:13,color:t.tx,marginBottom:8}}>記録一覧 ({filtered.length}件)</div>
+            <div style={{fontWeight:700,fontSize:13,color:t.tx,marginBottom:4}}>記録一覧 ({filtered.length}件)</div>
+            <div style={{fontSize:11,color:t.txm,marginBottom:8}}>長押しで詳細を表示</div>
             {filtered.map(e=>(
-              <div key={e.id} style={{background:t.card,padding:11,borderRadius:12,marginBottom:8,display:"flex",gap:11,boxShadow:`0 2px 6px ${t.sh}`}}>
+              <div key={e.id}
+                onMouseDown={()=>startMpLP(e.id)} onMouseUp={cancelMpLP} onMouseLeave={cancelMpLP}
+                onTouchStart={()=>startMpLP(e.id)} onTouchEnd={cancelMpLP} onTouchMove={moveMpLP}
+                style={{background:t.card,padding:11,borderRadius:12,marginBottom:8,display:"flex",gap:11,boxShadow:`0 2px 6px ${t.sh}`,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none"}}>
                 <img src={e.images?.[0]||PH()} alt={e.shopName} style={{width:52,height:52,borderRadius:9,objectFit:"cover",flexShrink:0}} onError={ev=>{ev.target.src=PH();}}/>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:700,fontSize:13,color:t.tx}}>{e.shopName}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:13,color:t.tx,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{e.shopName}</div>
                   <div style={{fontSize:11,color:t.txm}}>{e.visitDate} / {"★".repeat(e.rating||0)}</div>
                   <span style={{fontSize:10,fontWeight:700,color:e.privacy===PRIVACY.PUBLIC?t.acc:e.privacy===PRIVACY.FRIENDS?"#27ae60":t.txm}}>{PRIVACY_LABEL[e.privacy||PRIVACY.PRIVATE]}</span>
                 </div>
+                <div style={{fontSize:10,color:t.txm,alignSelf:"center",flexShrink:0}}>長押し→</div>
               </div>
             ))}
           </>
