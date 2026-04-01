@@ -768,25 +768,26 @@ function MapPage() {
 }
 
 
-// ─── アルバム詳細（フルスクリーン・長押し起動・スワイプ切替） ─────
+// ─── アルバム詳細（長押し起動・スワイプ切替・画像フルスクリーン） ─────
 function AlbumDetail({ entryId, entries, onClose, onDelete, onAddImages, onRemoveImage, onUpdate, t }) {
-  const idx      = entries.findIndex(e => e.id === entryId);
-  const [cur, setCur]           = useState(idx < 0 ? 0 : idx);
-  const [imgIdx, setImgIdx]     = useState(0);
-  const [mode, setMode]         = useState("view"); // "view"|"edit"|"photos"
-  const [draft, setDraft]       = useState(null);
+  const startIdx = entries.findIndex(e => e.id === entryId);
+  const [cur,        setCur]        = useState(startIdx < 0 ? 0 : startIdx);
+  const [mode,       setMode]       = useState("view"); // "view" | "edit"
+  const [draft,      setDraft]      = useState(null);
+  const [imgFull,    setImgFull]    = useState(false);  // フルスクリーン表示中
+  const [imgIdx,     setImgIdx]     = useState(0);      // フルスクリーンでの画像位置
   const [addLoading, setAddLoading] = useState(false);
-  const [addProg, setAddProg]   = useState(0);
-  const [addTotal, setAddTotal] = useState(0);
+  const [addProg,    setAddProg]    = useState(0);
+  const [addTotal,   setAddTotal]   = useState(0);
 
   const entry  = entries[cur];
   const images = entry?.images || [];
   const total  = entries.length;
 
-  // アルバム切替時に画像・モードをリセット
-  useEffect(() => { setImgIdx(0); setMode("view"); }, [cur]);
+  // アルバム切替時リセット
+  useEffect(() => { setImgIdx(0); setMode("view"); setImgFull(false); }, [cur]);
 
-  // 編集モード開始時にdraftを初期化
+  // 編集モード開始時にdraft初期化
   useEffect(() => {
     if (mode === "edit" && entry) {
       setDraft({
@@ -796,99 +797,165 @@ function AlbumDetail({ entryId, entries, onClose, onDelete, onAddImages, onRemov
         price:     entry.price     || "",
         genre:     entry.genre     || "その他",
         area:      entry.area      || "",
-        rating:    entry.rating    || 4,
+        rating:    entry.rating    || 3,
         comment:   entry.comment   || "",
         privacy:   entry.privacy   || PRIVACY.PRIVATE,
       });
     }
-  }, [mode]);
+  }, [mode, cur]);
 
   if (!entry) return null;
 
-  // ─ アルバム間スワイプ（左右） ─
-  const albumSwipeX = useRef(null);
-  const albumSwipeY = useRef(null);
-  const onAlbumTS = e => {
-    albumSwipeX.current = e.touches[0].clientX;
-    albumSwipeY.current = e.touches[0].clientY;
-  };
+  // ─ アルバム間スワイプ ─
+  const swX = useRef(null), swY = useRef(null);
+  const onAlbumTS = e => { swX.current=e.touches[0].clientX; swY.current=e.touches[0].clientY; };
   const onAlbumTE = e => {
-    if (albumSwipeX.current === null) return;
-    const dx = e.changedTouches[0].clientX - albumSwipeX.current;
-    const dy = e.changedTouches[0].clientY - albumSwipeY.current;
-    albumSwipeX.current = null;
-    if (Math.abs(dy) > Math.abs(dx) * 1.2) return;
-    if (dx < -60 && cur < total - 1) setCur(c => c + 1);
-    if (dx >  60 && cur > 0)         setCur(c => c - 1);
+    if (swX.current===null) return;
+    const dx=e.changedTouches[0].clientX-swX.current, dy=e.changedTouches[0].clientY-swY.current;
+    swX.current=null;
+    if (Math.abs(dy)>Math.abs(dx)*1.2) return;
+    if (dx<-60 && cur<total-1) setCur(c=>c+1);
+    if (dx> 60 && cur>0)       setCur(c=>c-1);
   };
 
-  // ─ 画像内スワイプ ─
-  const imgSwipeX = useRef(null);
-  const onImgTS = e => { e.stopPropagation(); imgSwipeX.current = e.touches[0].clientX; };
-  const onImgTE = e => {
-    e.stopPropagation();
-    if (imgSwipeX.current === null) return;
-    const dx = e.changedTouches[0].clientX - imgSwipeX.current;
-    imgSwipeX.current = null;
-    if (dx < -40 && imgIdx < images.length - 1) setImgIdx(i => i + 1);
-    if (dx >  40 && imgIdx > 0)                 setImgIdx(i => i - 1);
+  // ─ フルスクリーン画像スワイプ ─
+  const fsX = useRef(null);
+  const onFsTS = e => { fsX.current=e.touches[0].clientX; };
+  const onFsTE = e => {
+    if (fsX.current===null) return;
+    const dx=e.changedTouches[0].clientX-fsX.current; fsX.current=null;
+    if (dx<-40 && imgIdx<images.length-1) setImgIdx(i=>i+1);
+    if (dx> 40 && imgIdx>0)               setImgIdx(i=>i-1);
   };
 
-  const saveDraft = () => { if (draft) { onUpdate(entry.id, draft); setMode("view"); } };
+  // ─ サムネイル長押し ─
+  const imgLpTimer = useRef(null);
+  const imgLpMoved = useRef(false);
+  const startImgLP = (i) => {
+    imgLpMoved.current = false;
+    imgLpTimer.current = setTimeout(() => {
+      if (imgLpMoved.current) return;
+      if (navigator.vibrate) navigator.vibrate(25);
+      setImgIdx(i);
+      setImgFull(true);
+    }, 400);
+  };
+  const cancelImgLP = () => { clearTimeout(imgLpTimer.current); imgLpTimer.current=null; };
+  const moveImgLP   = () => { imgLpMoved.current=true; cancelImgLP(); };
 
-  const handleAdd = async files => {
-    const arr = Array.from(files || []); if (!arr.length) return;
+  const saveDraft = () => {
+    if (!draft || !draft.shopName.trim()) return;
+    onUpdate(entry.id, draft);
+    setMode("view");
+  };
+
+  const handleAddPhotos = async (files) => {
+    const arr = Array.from(files||[]); if (!arr.length) return;
     setAddLoading(true); setAddProg(0); setAddTotal(arr.length);
-    for (let i = 0; i < arr.length; i++) {
+    for (let i=0; i<arr.length; i++) {
       await onAddImages(entry.id, [arr[i]]);
-      setAddProg(i + 1);
-      await new Promise(r => setTimeout(r, 20));
+      setAddProg(i+1);
+      await new Promise(r=>setTimeout(r,20));
     }
     setAddLoading(false);
   };
 
-  const inp = { width:"100%", padding:"9px 12px", background:t.bg2, border:`1.5px solid ${t.br}`, borderRadius:9, fontSize:13, color:t.tx, outline:"none", boxSizing:"border-box" };
+  const D = (v) => v && String(v).trim() ? v : "—"; // 空値→「—」
+  const inp = { width:"100%", padding:"10px 12px", background:t.bg2, border:`1.5px solid ${t.br}`, borderRadius:9, fontSize:14, color:t.tx, outline:"none", boxSizing:"border-box" };
+  const label = { fontSize:11, color:t.txm, fontWeight:700, marginBottom:4, display:"block" };
   const PRIV_OPTS = [
-    [PRIVACY.PUBLIC,  "🌐 全体公開", t.acc      ],
-    [PRIVACY.FRIENDS, "👥 グループ", "#27ae60"  ],
-    [PRIVACY.PRIVATE, "🔒 非公開",   t.txm      ],
+    [PRIVACY.PUBLIC,  "🌐 全体公開", t.acc    ],
+    [PRIVACY.FRIENDS, "👥 グループ", "#27ae60"],
+    [PRIVACY.PRIVATE, "🔒 非公開",   t.txm   ],
   ];
 
   return (
-    <div
-      style={{ position:"fixed", inset:0, zIndex:200, background:t.bg, display:"flex", flexDirection:"column" }}
-      onTouchStart={mode === "view" ? onAlbumTS : undefined}
-      onTouchEnd={mode   === "view" ? onAlbumTE : undefined}
-    >
-      {/* ── ヘッダーバー ── */}
-      <div style={{ flexShrink:0, display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:t.card, borderBottom:`1px solid ${t.br}`, zIndex:10 }}>
-        <button onClick={onClose}
-          style={{ background:"none", border:"none", fontSize:22, cursor:"pointer", color:t.txm, padding:"2px 4px", lineHeight:1 }}>←</button>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontWeight:700, fontSize:15, color:t.tx, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
-            {mode === "edit" ? "✏️ 編集" : mode === "photos" ? "📷 写真管理" : entry.shopName}
+    <div style={{ position:"fixed", inset:0, zIndex:200, background:t.bg, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+
+      {/* ══ フルスクリーン画像ビューア ══ */}
+      {imgFull && (
+        <div
+          style={{ position:"fixed", inset:0, zIndex:300, background:"#000", display:"flex", flexDirection:"column" }}
+          onTouchStart={onFsTS} onTouchEnd={onFsTE}
+        >
+          {/* 上部バー */}
+          <div style={{ flexShrink:0, display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 16px", zIndex:10 }}>
+            <button onClick={()=>setImgFull(false)}
+              style={{ background:"rgba(255,255,255,0.18)", border:"none", borderRadius:20, padding:"6px 14px", color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              ✕ 閉じる
+            </button>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ color:"rgba(255,255,255,0.8)", fontSize:13, fontWeight:700 }}>
+                {imgIdx+1} / {images.length}
+              </span>
+              {imgIdx < images.length-1 && (
+                <button onClick={()=>setImgIdx(i=>i+1)}
+                  style={{ background:"rgba(255,255,255,0.18)", border:"none", borderRadius:16, padding:"6px 12px", color:"white", fontSize:16, fontWeight:700, cursor:"pointer" }}>›</button>
+              )}
+            </div>
           </div>
-          <div style={{ fontSize:10, color:t.txm }}>{cur+1} / {total}件　←スワイプで切替→</div>
+          {/* 画像 */}
+          <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", position:"relative" }}>
+            <img src={images[imgIdx]} alt=""
+              style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }}
+              onError={ev=>{ev.target.src=PH();}}/>
+            {imgIdx > 0 && (
+              <button onClick={()=>setImgIdx(i=>i-1)}
+                style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", background:"rgba(255,255,255,0.2)", border:"none", borderRadius:"50%", width:42, height:42, color:"white", fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+            )}
+            {imgIdx < images.length-1 && (
+              <button onClick={()=>setImgIdx(i=>i+1)}
+                style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"rgba(255,255,255,0.2)", border:"none", borderRadius:"50%", width:42, height:42, color:"white", fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+            )}
+          </div>
+          {/* 下部ドット */}
+          {images.length > 1 && (
+            <div style={{ flexShrink:0, display:"flex", justifyContent:"center", gap:5, padding:"12px 0" }}>
+              {images.map((_,i)=>(
+                <div key={i} onClick={()=>setImgIdx(i)}
+                  style={{ width:i===imgIdx?16:6, height:6, borderRadius:3, background:i===imgIdx?"white":"rgba(255,255,255,0.3)", transition:"all 0.2s", cursor:"pointer" }}/>
+              ))}
+            </div>
+          )}
         </div>
-        {mode === "view" && (
-          <>
-            <button onClick={() => cur > 0 && setCur(c => c-1)}
-              style={{ background:cur>0?t.accm:"transparent", border:"none", borderRadius:8, padding:"6px 11px", fontSize:18, color:cur>0?t.acc:t.br, cursor:cur>0?"pointer":"default", fontWeight:700 }}>‹</button>
-            <button onClick={() => cur < total-1 && setCur(c => c+1)}
-              style={{ background:cur<total-1?t.accm:"transparent", border:"none", borderRadius:8, padding:"6px 11px", fontSize:18, color:cur<total-1?t.acc:t.br, cursor:cur<total-1?"pointer":"default", fontWeight:700 }}>›</button>
-          </>
+      )}
+
+      {/* ══ ヘッダー ══ */}
+      <div style={{ flexShrink:0, display:"flex", alignItems:"center", gap:6, padding:"10px 12px", background:t.card, borderBottom:`1px solid ${t.br}`, zIndex:10 }}>
+        <button onClick={mode==="view"?onClose:()=>setMode("view")}
+          style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:t.txm, padding:"4px 6px", lineHeight:1, flexShrink:0 }}>←</button>
+
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:700, fontSize:14, color:t.tx, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+            {mode==="edit" ? "✏️ 編集モード" : entry.shopName}
+          </div>
+          {mode==="view" && <div style={{ fontSize:10, color:t.txm }}>{cur+1} / {total}件　スワイプで切替</div>}
+        </div>
+
+        {/* 編集ボタン（view時のみ） */}
+        {mode==="view" && (
+          <button onClick={()=>setMode("edit")}
+            style={{ flexShrink:0, background:t.grad, border:"none", borderRadius:8, padding:"6px 12px", color:"white", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            ✏️ 編集
+          </button>
         )}
-        {mode !== "view" && (
-          <button onClick={() => setMode("view")}
-            style={{ background:t.bg2, border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, color:t.txm, cursor:"pointer" }}>← 戻る</button>
+
+        {/* アルバム切替ボタン（view時のみ） */}
+        {mode==="view" && (
+          <>
+            <button onClick={()=>cur>0&&setCur(c=>c-1)}
+              style={{ flexShrink:0, background:cur>0?t.accm:"transparent", border:"none", borderRadius:8, padding:"6px 10px", fontSize:18, color:cur>0?t.acc:t.br, cursor:cur>0?"pointer":"default", fontWeight:700 }}>‹</button>
+            <button onClick={()=>cur<total-1&&setCur(c=>c+1)}
+              style={{ flexShrink:0, background:cur<total-1?t.accm:"transparent", border:"none", borderRadius:8, padding:"6px 10px", fontSize:18, color:cur<total-1?t.acc:t.br, cursor:cur<total-1?"pointer":"default", fontWeight:700 }}>›</button>
+          </>
         )}
       </div>
 
-      {/* ── アルバム位置ドット ── */}
-      {total > 1 && mode === "view" && (
-        <div style={{ flexShrink:0, display:"flex", justifyContent:"center", alignItems:"center", gap:4, padding:"5px 12px", background:t.card, overflowX:"auto" }}>
-          {entries.map((_, i) => (
-            <div key={i} onClick={() => setCur(i)}
+      {/* ドットナビ */}
+      {total>1 && mode==="view" && (
+        <div style={{ flexShrink:0, display:"flex", justifyContent:"center", alignItems:"center", gap:4, padding:"5px 10px", background:t.card, overflowX:"auto" }}>
+          {entries.map((_,i)=>(
+            <div key={i} onClick={()=>setCur(i)}
               style={{ flexShrink:0, width:i===cur?18:5, height:5, borderRadius:3, background:i===cur?t.acc:t.br, transition:"all 0.22s", cursor:"pointer" }}/>
           ))}
         </div>
@@ -897,128 +964,145 @@ function AlbumDetail({ entryId, entries, onClose, onDelete, onAddImages, onRemov
       {/* ══════════════════════════════════════════
           ── 表示モード ──
       ══════════════════════════════════════════ */}
-      {mode === "view" && (
-        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {mode==="view" && (
+        <div style={{ flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch" }}
+          onTouchStart={onAlbumTS} onTouchEnd={onAlbumTE}>
 
-          {/* 画像ビューア */}
-          <div style={{ position:"relative", background:"#000", flexShrink:0, height:250 }}
-            onTouchStart={onImgTS} onTouchEnd={onImgTE}>
-            {images.length > 0 ? (
-              <img src={images[imgIdx]} alt=""
-                style={{ width:"100%", height:250, objectFit:"contain", display:"block" }}
-                onError={ev => { ev.target.src = PH(); }}/>
-            ) : (
-              <div style={{ height:250, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", color:"#555", gap:8 }}>
-                <span style={{ fontSize:48 }}>📷</span>
-                <span style={{ fontSize:12 }}>写真なし — 下の「写真を管理」から追加</span>
+          {/* ── 写真セクション ── */}
+          <div style={{ padding:"14px 14px 0" }}>
+            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:8 }}>📷 写真</div>
+
+            {/* 画像追加中インジケーター */}
+            {addLoading && (
+              <div style={{ display:"flex", alignItems:"center", gap:10, background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
+                <div style={{ fontSize:20, animation:"spin 0.5s linear infinite" }}>🍜</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:t.tx }}>追加中... {addProg}/{addTotal}</div>
+                  <div style={{ height:4, background:t.br, borderRadius:2, overflow:"hidden", marginTop:4 }}>
+                    <div style={{ height:"100%", background:t.grad, width:`${addTotal>0?(addProg/addTotal)*100:0}%`, borderRadius:2, transition:"width 0.2s" }}/>
+                  </div>
+                </div>
               </div>
             )}
-            {images.length > 1 && (
-              <>
-                <div style={{ position:"absolute", bottom:10, left:"50%", transform:"translateX(-50%)", display:"flex", gap:5 }}>
-                  {images.map((_, i) => (
-                    <div key={i} onClick={() => setImgIdx(i)}
-                      style={{ width:i===imgIdx?14:6, height:6, borderRadius:3, background:i===imgIdx?"white":"rgba(255,255,255,0.4)", transition:"all 0.2s", cursor:"pointer" }}/>
-                  ))}
-                </div>
-                <div style={{ position:"absolute", top:10, right:10, background:"rgba(0,0,0,0.65)", color:"white", fontSize:11, fontWeight:700, borderRadius:10, padding:"3px 9px" }}>
-                  {imgIdx+1} / {images.length}
-                </div>
-                {imgIdx > 0 && (
-                  <button onClick={() => setImgIdx(i => i-1)}
-                    style={{ position:"absolute", left:8, top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,0.5)", border:"none", borderRadius:"50%", width:36, height:36, color:"white", fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
-                )}
-                {imgIdx < images.length-1 && (
-                  <button onClick={() => setImgIdx(i => i+1)}
-                    style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,0.5)", border:"none", borderRadius:"50%", width:36, height:36, color:"white", fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
-                )}
-              </>
+
+            {/* 2列サムネイルグリッド */}
+            {images.length > 0 ? (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                {images.map((img, i) => (
+                  <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", boxShadow:`0 2px 8px ${t.sh}`, aspectRatio:"1/1" }}
+                    onMouseDown={()=>startImgLP(i)} onMouseUp={cancelImgLP} onMouseLeave={cancelImgLP}
+                    onTouchStart={()=>startImgLP(i)} onTouchEnd={cancelImgLP} onTouchMove={moveImgLP}>
+                    <img src={img} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}
+                      onError={ev=>{ev.target.src=PH();}}/>
+                    {/* 表紙バッジ */}
+                    {i===0 && (
+                      <div style={{ position:"absolute", top:6, left:6, background:t.grad, color:"white", fontSize:9, fontWeight:700, borderRadius:6, padding:"2px 7px" }}>表紙</div>
+                    )}
+                    {/* 削除ボタン */}
+                    <button onClick={()=>{ onRemoveImage(entry.id, i); if(imgIdx>=images.length-1) setImgIdx(Math.max(0,images.length-2)); }}
+                      style={{ position:"absolute", top:5, right:5, background:"rgba(231,76,60,0.88)", border:"none", borderRadius:"50%", width:24, height:24, color:"white", fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
+                    {/* 長押しヒント */}
+                    <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.4)", color:"white", fontSize:9, textAlign:"center", padding:"3px 0" }}>長押しで拡大</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ background:t.bg2, borderRadius:12, padding:"20px", textAlign:"center", color:t.txm, marginBottom:10 }}>
+                <div style={{ fontSize:32, marginBottom:6 }}>📷</div>
+                <div style={{ fontSize:12 }}>写真なし</div>
+              </div>
             )}
+
+            {/* 写真追加ボタン */}
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, padding:"11px", background:t.accm, border:`1.5px dashed ${t.acc}`, borderRadius:10, color:t.acc, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:14 }}>
+              ＋ 写真を追加（複数可）
+              <input type="file" multiple accept="image/*" hidden onChange={ev=>{handleAddPhotos(ev.target.files);ev.target.value="";}}/>
+            </label>
           </div>
 
-          {/* ─ 情報・操作エリア（スクロール可） ─ */}
-          <div style={{ flex:1, overflowY:"auto", padding:"14px 16px 24px" }}>
+          <div style={{ height:1, background:t.br, margin:"0 14px 14px" }}/>
 
-            {/* 店舗名 + 品名 + 価格 */}
-            <div style={{ marginBottom:14, paddingBottom:14, borderBottom:`1px solid ${t.br}` }}>
-              <div style={{ fontWeight:800, fontSize:22, color:t.tx, marginBottom:6, lineHeight:1.2 }}>{entry.shopName}</div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-                {entry.menu  && <span style={{ background:t.accm, color:t.acc, fontWeight:700, fontSize:13, borderRadius:8, padding:"4px 10px" }}>🍜 {entry.menu}</span>}
-                {entry.price && <span style={{ background:"#FFF9E6", color:t.star,  fontWeight:700, fontSize:13, borderRadius:8, padding:"4px 10px" }}>💴 {entry.price}</span>}
+          {/* ── 詳細情報セクション ── */}
+          <div style={{ padding:"0 14px" }}>
+
+            {/* 店舗名 */}
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:3 }}>🏪 店舗名</div>
+              <div style={{ fontSize:18, fontWeight:800, color:t.tx, lineHeight:1.3 }}>{D(entry.shopName)}</div>
+            </div>
+
+            {/* 品名 + 価格 横並び */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+              <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px" }}>
+                <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:4 }}>🍜 品名</div>
+                <div style={{ fontSize:13, fontWeight:700, color:entry.menu?t.acc:t.txm }}>{D(entry.menu)}</div>
+              </div>
+              <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px" }}>
+                <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:4 }}>💴 価格</div>
+                <div style={{ fontSize:13, fontWeight:700, color:entry.price?t.star:t.txm }}>{D(entry.price)}</div>
               </div>
             </div>
 
-            {/* メタ情報グリッド */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+            {/* 訪問日 / ジャンル / エリア */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
               {[
-                ["📅", "訪問日",  entry.visitDate || "—"],
-                ["🍜", "ジャンル", entry.genre    || "—"],
-                ["📍", "エリア",  entry.area      || "—"],
-              ].map(([ico, l, v]) => (
-                <div key={l} style={{ background:t.bg2, borderRadius:10, padding:"9px 8px", textAlign:"center" }}>
-                  <div style={{ fontSize:16, marginBottom:2 }}>{ico}</div>
-                  <div style={{ fontSize:9,  color:t.txm, marginBottom:2 }}>{l}</div>
-                  <div style={{ fontSize:11, fontWeight:700, color:t.tx }}>{v}</div>
+                ["📅","訪問日",  entry.visitDate],
+                ["🍜","ジャンル",entry.genre   ],
+                ["📍","エリア",  entry.area     ],
+              ].map(([ico,lbl,val])=>(
+                <div key={lbl} style={{ background:t.bg2, borderRadius:10, padding:"9px 6px", textAlign:"center" }}>
+                  <div style={{ fontSize:14, marginBottom:2 }}>{ico}</div>
+                  <div style={{ fontSize:9, color:t.txm, marginBottom:2 }}>{lbl}</div>
+                  <div style={{ fontSize:11, fontWeight:700, color:val?t.tx:t.txm }}>{D(val)}</div>
                 </div>
               ))}
             </div>
 
             {/* 評価 */}
-            <div style={{ marginBottom:14 }}>
+            <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
               <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:6 }}>⭐ 評価</div>
-              <div style={{ display:"flex", gap:4 }}>
-                {[1,2,3,4,5].map(n => (
-                  <span key={n} style={{ fontSize:30, color:(entry.rating||0)>=n?t.star:t.br, lineHeight:1 }}>★</span>
-                ))}
-              </div>
+              {entry.rating ? (
+                <div style={{ display:"flex", gap:3 }}>
+                  {[1,2,3,4,5].map(n=>(
+                    <span key={n} style={{ fontSize:26, color:(entry.rating||0)>=n?t.star:t.br, lineHeight:1 }}>★</span>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize:12, color:t.txm }}>—</div>
+              )}
             </div>
 
-            {/* コメント */}
-            {entry.comment ? (
-              <div style={{ background:t.accm, borderRadius:12, padding:"12px 14px", marginBottom:16, borderLeft:`4px solid ${t.acc}` }}>
-                <div style={{ fontSize:10, color:t.acc, fontWeight:700, marginBottom:4 }}>💬 レビュー・コメント</div>
-                <p style={{ fontSize:14, color:t.tx, margin:0, lineHeight:1.75 }}>「{entry.comment}」</p>
-              </div>
-            ) : (
-              <div style={{ background:t.bg2, borderRadius:12, padding:"10px 14px", marginBottom:16, fontSize:12, color:t.txm, textAlign:"center" }}>
-                コメントなし — 編集から追加できます
-              </div>
-            )}
-
-            {/* 編集ボタン */}
-            <button onClick={() => setMode("edit")}
-              style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:t.grad, color:"white", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10, boxShadow:`0 4px 14px ${t.sh}` }}>
-              ✏️ 編集する
-            </button>
+            {/* レビュー・コメント */}
+            <div style={{ background:t.bg2, borderRadius:10, padding:"10px 12px", marginBottom:14 }}>
+              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:6 }}>💬 レビュー・コメント</div>
+              {entry.comment ? (
+                <p style={{ fontSize:14, color:t.tx, margin:0, lineHeight:1.75, borderLeft:`3px solid ${t.acc}`, paddingLeft:10 }}>
+                  {entry.comment}
+                </p>
+              ) : (
+                <div style={{ fontSize:12, color:t.txm }}>— （編集から追加できます）</div>
+              )}
+            </div>
 
             {/* 公開設定 */}
-            <div style={{ marginBottom:10, background:t.card, borderRadius:12, padding:"12px 14px", border:`1px solid ${t.br}` }}>
-              <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:8 }}>🔐 公開設定</div>
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:10, color:t.txm, fontWeight:700, marginBottom:6 }}>🔐 公開設定</div>
               <div style={{ display:"flex", gap:6 }}>
-                {PRIV_OPTS.map(([key, label, col]) => (
-                  <button key={key}
-                    onClick={() => onUpdate(entry.id, { privacy: key })}
-                    style={{
-                      flex:1, padding:"9px 4px", borderRadius:10, border:"none",
+                {PRIV_OPTS.map(([key,lbl,col])=>(
+                  <button key={key} onClick={()=>onUpdate(entry.id,{privacy:key})}
+                    style={{ flex:1, padding:"9px 4px", borderRadius:9, border:"none",
                       background:(entry.privacy||PRIVACY.PRIVATE)===key?col:t.bg2,
-                      color:     (entry.privacy||PRIVACY.PRIVATE)===key?"white":t.tx2,
-                      fontSize:10, fontWeight:700, cursor:"pointer", transition:"background 0.18s",
-                    }}>
-                    {label}
+                      color:(entry.privacy||PRIVACY.PRIVATE)===key?"white":t.tx2,
+                      fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                    {lbl}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* 写真管理 */}
-            <button onClick={() => setMode("photos")}
-              style={{ width:"100%", padding:"12px", borderRadius:12, border:`1.5px solid ${t.br}`, background:t.bg2, color:t.tx, fontWeight:600, fontSize:13, cursor:"pointer", marginBottom:10 }}>
-              📷 写真を管理する（{images.length}枚）
-            </button>
-
-            {/* 削除 */}
-            <button onClick={() => { if(window.confirm(`「${entry.shopName}」のアルバムを削除しますか？`)) { onDelete(entry.id); onClose(); } }}
-              style={{ width:"100%", padding:"12px", borderRadius:12, border:"1.5px solid #FADBD8", background:"#FFF5F5", color:"#E74C3C", fontWeight:600, fontSize:13, cursor:"pointer" }}>
+            {/* 削除ボタン */}
+            <button onClick={()=>{ if(window.confirm(`「${entry.shopName}」を削除しますか？`)){onDelete(entry.id);onClose();} }}
+              style={{ width:"100%", padding:"12px", borderRadius:10, border:"1.5px solid #FADBD8", background:"#FFF5F5", color:"#E74C3C", fontWeight:600, fontSize:13, cursor:"pointer", marginBottom:24 }}>
               🗑️ このアルバムを削除
             </button>
           </div>
@@ -1028,130 +1112,110 @@ function AlbumDetail({ entryId, entries, onClose, onDelete, onAddImages, onRemov
       {/* ══════════════════════════════════════════
           ── 編集モード ──
       ══════════════════════════════════════════ */}
-      {mode === "edit" && draft && (
-        <div style={{ flex:1, overflowY:"auto", padding:"14px 16px 32px" }}>
+      {mode==="edit" && draft && (
+        <div style={{ flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch", padding:"16px 14px 40px" }}>
 
           {/* 店舗名 */}
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>🏪 店舗名 *</div>
-            <input style={inp} value={draft.shopName} onChange={e=>setDraft(d=>({...d,shopName:e.target.value}))} placeholder="例：らぁ麺 飯田商店"/>
+          <div style={{ marginBottom:13 }}>
+            <span style={label}>🏪 店舗名 *</span>
+            <input style={inp} value={draft.shopName}
+              onChange={e=>setDraft(d=>({...d,shopName:e.target.value}))}
+              placeholder="例：らぁ麺 飯田商店"/>
           </div>
 
           {/* 品名 */}
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>🍜 品名（注文メニュー）</div>
-            <input style={inp} value={draft.menu} onChange={e=>setDraft(d=>({...d,menu:e.target.value}))} placeholder="例：特製醤油らーめん"/>
+          <div style={{ marginBottom:13 }}>
+            <span style={label}>🍜 品名（注文メニュー）</span>
+            <input style={inp} value={draft.menu}
+              onChange={e=>setDraft(d=>({...d,menu:e.target.value}))}
+              placeholder="例：特製醤油らーめん"/>
           </div>
 
           {/* 価格 */}
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>💴 価格</div>
-            <input style={inp} value={draft.price} onChange={e=>setDraft(d=>({...d,price:e.target.value}))} placeholder="例：1,200円"/>
+          <div style={{ marginBottom:13 }}>
+            <span style={label}>💴 価格</span>
+            <input style={inp} value={draft.price}
+              onChange={e=>setDraft(d=>({...d,price:e.target.value}))}
+              placeholder="例：1,200円"/>
           </div>
 
           {/* 訪問日 + ジャンル */}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:13 }}>
             <div>
-              <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>📅 訪問日</div>
-              <input type="date" style={inp} value={draft.visitDate} onChange={e=>setDraft(d=>({...d,visitDate:e.target.value}))}/>
+              <span style={label}>📅 訪問日</span>
+              <input type="date" style={inp} value={draft.visitDate}
+                onChange={e=>setDraft(d=>({...d,visitDate:e.target.value}))}/>
             </div>
             <div>
-              <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>ジャンル</div>
-              <select style={{...inp, height:42}} value={draft.genre} onChange={e=>setDraft(d=>({...d,genre:e.target.value}))}>
+              <span style={label}>ジャンル</span>
+              <select style={{...inp, height:43}} value={draft.genre}
+                onChange={e=>setDraft(d=>({...d,genre:e.target.value}))}>
                 {["醤油","豚骨","塩","味噌","つけ麺","鶏白湯","二郎系","中華そば","煮干し","担々麺","その他"].map(g=><option key={g}>{g}</option>)}
               </select>
             </div>
           </div>
 
           {/* エリア */}
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>📍 エリア</div>
-            <input style={inp} value={draft.area} onChange={e=>setDraft(d=>({...d,area:e.target.value}))} placeholder="例：新宿"/>
+          <div style={{ marginBottom:13 }}>
+            <span style={label}>📍 エリア</span>
+            <input style={inp} value={draft.area}
+              onChange={e=>setDraft(d=>({...d,area:e.target.value}))}
+              placeholder="例：新宿"/>
           </div>
 
           {/* 評価 */}
-          <div style={{ marginBottom:14 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:8 }}>⭐ 評価</div>
+          <div style={{ marginBottom:16 }}>
+            <span style={label}>⭐ 評価</span>
             <div style={{ display:"flex", gap:8 }}>
-              {[1,2,3,4,5].map(n => (
-                <button key={n} onClick={() => setDraft(d=>({...d,rating:n}))}
-                  style={{ width:46, height:46, borderRadius:"50%", border:"none", background:draft.rating>=n?t.star:"#eee", color:draft.rating>=n?"white":"#bbb", fontSize:22, cursor:"pointer", transition:"background 0.15s" }}>★</button>
+              {[1,2,3,4,5].map(n=>(
+                <button key={n} onClick={()=>setDraft(d=>({...d,rating:n}))}
+                  style={{ width:46, height:46, borderRadius:"50%", border:"none",
+                    background:draft.rating>=n?t.star:"#eee",
+                    color:draft.rating>=n?"white":"#bbb",
+                    fontSize:22, cursor:"pointer", transition:"background 0.15s" }}>★</button>
               ))}
             </div>
           </div>
 
           {/* コメント */}
-          <div style={{ marginBottom:14 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:4 }}>💬 レビュー・コメント</div>
-            <textarea style={{...inp, minHeight:88, resize:"none", lineHeight:1.6}} value={draft.comment} onChange={e=>setDraft(d=>({...d,comment:e.target.value}))} placeholder="感想・おすすめポイントなど"/>
+          <div style={{ marginBottom:16 }}>
+            <span style={label}>💬 レビュー・コメント</span>
+            <textarea style={{...inp, minHeight:90, resize:"none", lineHeight:1.65}}
+              value={draft.comment}
+              onChange={e=>setDraft(d=>({...d,comment:e.target.value}))}
+              placeholder="感想・おすすめポイントなど"/>
           </div>
 
           {/* 公開設定 */}
-          <div style={{ marginBottom:18 }}>
-            <div style={{ fontSize:11, color:t.txm, fontWeight:700, marginBottom:6 }}>🔐 公開設定</div>
+          <div style={{ marginBottom:22 }}>
+            <span style={label}>🔐 公開設定</span>
             <div style={{ display:"flex", gap:6 }}>
-              {PRIV_OPTS.map(([key, label, col]) => (
-                <button key={key} onClick={() => setDraft(d=>({...d,privacy:key}))}
-                  style={{ flex:1, padding:"10px 4px", borderRadius:10, border:"none", background:draft.privacy===key?col:t.bg2, color:draft.privacy===key?"white":t.tx2, fontSize:10, fontWeight:700, cursor:"pointer", transition:"background 0.15s" }}>
-                  {label}
+              {PRIV_OPTS.map(([key,lbl,col])=>(
+                <button key={key} onClick={()=>setDraft(d=>({...d,privacy:key}))}
+                  style={{ flex:1, padding:"10px 4px", borderRadius:10, border:"none",
+                    background:draft.privacy===key?col:t.bg2,
+                    color:draft.privacy===key?"white":t.tx2,
+                    fontSize:10, fontWeight:700, cursor:"pointer", transition:"background 0.15s" }}>
+                  {lbl}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* 登録ボタン */}
           <button onClick={saveDraft}
-            style={{ width:"100%", padding:"14px", borderRadius:12, border:"none", background:t.grad, color:"white", fontWeight:700, fontSize:15, cursor:"pointer", boxShadow:`0 4px 14px ${t.sh}` }}>
-            ✅ 保存する
+            style={{ width:"100%", padding:"15px", borderRadius:12, border:"none",
+              background:draft.shopName.trim()?t.grad:"#ccc",
+              color:"white", fontWeight:700, fontSize:15, cursor:draft.shopName.trim()?"pointer":"default",
+              boxShadow:draft.shopName.trim()?`0 4px 14px ${t.sh}`:"none" }}>
+            ✅ 登録する（上書き保存）
           </button>
-        </div>
-      )}
 
-      {/* ══════════════════════════════════════════
-          ── 写真管理モード ──
-      ══════════════════════════════════════════ */}
-      {mode === "photos" && (
-        <div style={{ flex:1, overflowY:"auto", padding:"14px 16px 32px" }}>
-
-          {addLoading && (
-            <div style={{ display:"flex", alignItems:"center", gap:10, background:t.bg2, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
-              <div style={{ fontSize:24, animation:"spin 0.5s linear infinite" }}>🍜</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:t.tx, marginBottom:4 }}>追加中... {addProg}/{addTotal}</div>
-                <div style={{ height:5, background:t.br, borderRadius:3, overflow:"hidden" }}>
-                  <div style={{ height:"100%", background:t.grad, width:`${addTotal>0?(addProg/addTotal)*100:0}%`, borderRadius:3, transition:"width 0.2s" }}/>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <label style={{ display:"block", textAlign:"center", padding:"14px 10px", background:t.acc, color:"white", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer", marginBottom:14, boxShadow:`0 4px 12px ${t.sh}` }}>
-            ＋ 写真を追加（複数可）
-            <input type="file" multiple accept="image/*" hidden onChange={ev => { handleAdd(ev.target.files); ev.target.value=""; }}/>
-          </label>
-
-          {images.length === 0 ? (
-            <div style={{ textAlign:"center", padding:"32px", color:t.txm }}>
-              <div style={{ fontSize:40, marginBottom:8 }}>📷</div>
-              <div>まだ写真がありません</div>
-            </div>
-          ) : (
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-              {images.map((img, i) => (
-                <div key={i} style={{ position:"relative", borderRadius:10, overflow:"hidden", boxShadow:`0 2px 8px ${t.sh}` }}>
-                  <img src={img} alt="" style={{ width:"100%", height:120, objectFit:"cover", display:"block" }}
-                    onError={ev=>{ev.target.src=PH();}}/>
-                  {i === 0 && (
-                    <div style={{ position:"absolute", top:6, left:6, background:t.grad, color:"white", fontSize:10, fontWeight:700, borderRadius:8, padding:"2px 8px" }}>表紙</div>
-                  )}
-                  <button onClick={() => { onRemoveImage(entry.id, i); if(imgIdx >= images.length-1) setImgIdx(Math.max(0, images.length-2)); }}
-                    style={{ position:"absolute", top:6, right:6, background:"rgba(231,76,60,0.9)", border:"none", borderRadius:"50%", width:26, height:26, color:"white", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
-                  <div style={{ padding:"5px 8px", background:t.card }}>
-                    <div style={{ fontSize:10, color:t.txm }}>{i===0?"表紙":i+1+"枚目"}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* キャンセル */}
+          <button onClick={()=>setMode("view")}
+            style={{ width:"100%", padding:"12px", borderRadius:12, border:`1px solid ${t.br}`, background:"none", color:t.txm, fontSize:13, cursor:"pointer", marginTop:10 }}>
+            キャンセル
+          </button>
         </div>
       )}
     </div>
@@ -1873,7 +1937,14 @@ function MainLayout() {
 
   return (
     <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",fontFamily:"'Noto Sans JP',ui-sans-serif,sans-serif",background:t.bg,overflow:"hidden"}}>
-      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}*{-webkit-tap-highlight-color:transparent}`}</style>
+      <style>{`
+        @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;}
+        html,body{width:100%;max-width:100vw;overflow-x:hidden;margin:0;padding:0;}
+        input,select,textarea{max-width:100%;font-family:inherit;}
+        img{max-width:100%;display:block;}
+        button{touch-action:manipulation;}
+      `}</style>
 
       {/* AI処理中フルスクリーンスピナー */}
       {aiState&&<FullscreenSpinner progress={aiState.progress} total={aiState.total} shopName={aiState.shopName}/>}
